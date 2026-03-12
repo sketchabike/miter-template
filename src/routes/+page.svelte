@@ -168,7 +168,7 @@
 
 	<footer>
 		<p>
-			Free and open source. Made for framebuilders by
+			Free and <a href="https://github.com/sketchabike/miter-template" target="_blank" rel="noopener">open source</a>. Made for framebuilders by
 			<a href="https://sketchabike.com" target="_blank" rel="noopener">SketchABike</a>.
 		</p>
 	</footer>
