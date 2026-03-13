@@ -3,6 +3,7 @@
 		generateCope,
 		generateBridgeMiter,
 		generateCompoundMiter,
+		generateCollectorMiter,
 		computeCompoundAngle,
 		PRESETS,
 		type CopeParams,
@@ -10,6 +11,7 @@
 		type BridgeParams,
 		type BridgeResult,
 		type CompoundAngleParams,
+		type CollectorParams,
 		type JointType
 	} from '$lib/math/cope.js';
 	import { generatePDF, PAPER_SIZES, type PaperSize } from '$lib/math/pdf.js';
@@ -49,18 +51,31 @@
 		staySpacing: 42
 	});
 
+	// --- Collector params ---
+	let collectorParams = $state<CollectorParams>({
+		cutDiameter: 28.6,
+		wallThickness: 0.9,
+		parents: [
+			{ parentDiameter: 28.6, angle: 60, clockPosition: -30, offset: 0 },
+			{ parentDiameter: 28.6, angle: 60, clockPosition: 30, offset: 0 }
+		]
+	});
+
 	// --- Computed results ---
 	let standardResult = $derived<CopeResult>(generateCope(params));
 	let bridgeResult = $derived<BridgeResult>(generateBridgeMiter(bridgeParams));
 	let compoundResult = $derived<CopeResult>(generateCompoundMiter(compoundParams));
+	let collectorResult = $derived<CopeResult>(generateCollectorMiter(collectorParams));
 
 	// Active result for display (single-curve types)
 	let activeResult = $derived<CopeResult>(
 		jointType === 'bridge'
-			? bridgeResult.endA // placeholder — bridge uses bridgeResult directly
+			? bridgeResult.endA
 			: jointType === 'compound-ss'
 				? compoundResult
-				: standardResult
+				: jointType === 'collector'
+					? collectorResult
+					: standardResult
 	);
 
 	// For compound angle: computed true angle and twist for info display
@@ -78,6 +93,10 @@
 
 	function handleCompoundParamsChange(newParams: CompoundAngleParams) {
 		compoundParams = newParams;
+	}
+
+	function handleCollectorParamsChange(newParams: CollectorParams) {
+		collectorParams = newParams;
 	}
 
 	function handlePrintPDF() {
@@ -163,6 +182,8 @@
 				onbridgechange={handleBridgeParamsChange}
 				compoundParams={compoundParams}
 				oncompoundchange={handleCompoundParamsChange}
+				{collectorParams}
+				oncollectorchange={handleCollectorParamsChange}
 				{units}
 				onunitschange={(u) => (units = u)}
 			/>
@@ -211,6 +232,19 @@
 					<div class="info-item">
 						<span class="info-label">Twist</span>
 						<span class="info-value">{compoundInfo.twist.toFixed(1)}°</span>
+					</div>
+				{:else if jointType === 'collector'}
+					<div class="info-item">
+						<span class="info-label">Circumference</span>
+						<span class="info-value">{fmtDim(collectorResult.circumference)}</span>
+					</div>
+					<div class="info-item">
+						<span class="info-label">Template Height</span>
+						<span class="info-value">{fmtDim(collectorResult.height)}</span>
+					</div>
+					<div class="info-item">
+						<span class="info-label">Parent Tubes</span>
+						<span class="info-value">{collectorParams.parents.length}</span>
 					</div>
 				{:else}
 					<div class="info-item">
@@ -262,6 +296,11 @@
 						<li>The tool computes the true 3D inter-tube angle and twist automatically</li>
 						<li>Stay spacing sets the lateral offset from seat tube center</li>
 						<li>Print and use as a standard single-end miter template</li>
+					{:else if jointType === 'collector'}
+						<li>Define the cut tube and add parent tubes that meet it</li>
+						<li>Each parent has a diameter, angle, and <strong>clock position</strong> (where it approaches around the cut tube)</li>
+						<li>The template shows the minimum envelope — the cut follows whichever parent surface is closest at each point</li>
+						<li>Useful for Y-junctions, exhaust collectors, and multi-tube nodes</li>
 					{:else if jointType === 'flat-plate'}
 						<li>Enter the cut tube diameter, wall thickness, and angle to the flat surface</li>
 						<li>No parent tube diameter needed — the flat surface has infinite radius</li>

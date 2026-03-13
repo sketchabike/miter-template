@@ -4,12 +4,16 @@
 		FLAT_PLATE_PRESETS,
 		BRIDGE_PRESETS,
 		COMPOUND_PRESETS,
+		COLLECTOR_PRESETS,
 		type JointPreset,
 		type CopeParams,
 		type BridgeParams,
 		type CompoundAngleParams,
+		type CollectorParams,
+		type CollectorTube,
 		type BridgePreset,
 		type CompoundPreset,
+		type CollectorPreset,
 		type JointType
 	} from '$lib/math/cope.js';
 
@@ -22,6 +26,8 @@
 		onbridgechange: (params: BridgeParams) => void;
 		compoundParams: CompoundAngleParams;
 		oncompoundchange: (params: CompoundAngleParams) => void;
+		collectorParams: CollectorParams;
+		oncollectorchange: (params: CollectorParams) => void;
 		units: 'mm' | 'in';
 		onunitschange: (units: 'mm' | 'in') => void;
 	}
@@ -35,6 +41,8 @@
 		onbridgechange,
 		compoundParams: initialCompoundParams,
 		oncompoundchange,
+		collectorParams: initialCollectorParams,
+		oncollectorchange,
 		units,
 		onunitschange
 	}: Props = $props();
@@ -79,6 +87,14 @@
 	let compSplay = $state(initialCompoundParams.splay);
 	let compStaySpacing = $state(initialCompoundParams.staySpacing);
 	let selectedCompoundPreset = $state('Custom Compound');
+
+	// --- Collector state ---
+	let collCutDia = $state(initialCollectorParams.cutDiameter);
+	let collWall = $state(initialCollectorParams.wallThickness);
+	let collParents = $state<CollectorTube[]>(
+		initialCollectorParams.parents.map((p) => ({ ...p }))
+	);
+	let selectedCollectorPreset = $state('Custom Collector');
 
 	const MM_PER_INCH = 25.4;
 
@@ -135,6 +151,28 @@
 			splay: compSplay,
 			staySpacing: compStaySpacing
 		});
+	}
+
+	function emitCollectorParams() {
+		oncollectorchange({
+			cutDiameter: collCutDia,
+			wallThickness: collWall,
+			parents: collParents.map((p) => ({ ...p }))
+		});
+	}
+
+	function addCollectorParent() {
+		collParents = [
+			...collParents,
+			{ parentDiameter: 25.4, angle: 60, clockPosition: 0, offset: 0 }
+		];
+		emitCollectorParams();
+	}
+
+	function removeCollectorParent(index: number) {
+		if (collParents.length <= 1) return;
+		collParents = collParents.filter((_, i) => i !== index);
+		emitCollectorParams();
 	}
 
 	// --- Preset handlers ---
@@ -201,6 +239,20 @@
 		if (preset) applyCompoundPreset(preset);
 	}
 
+	function applyCollectorPreset(preset: CollectorPreset) {
+		collCutDia = preset.cutDiameter;
+		collWall = preset.wallThickness;
+		collParents = preset.parents.map((p) => ({ ...p }));
+		emitCollectorParams();
+	}
+
+	function handleCollectorPresetChange(e: Event) {
+		const name = (e.target as HTMLSelectElement).value;
+		selectedCollectorPreset = name;
+		const preset = COLLECTOR_PRESETS.find((p) => p.name === name);
+		if (preset) applyCollectorPreset(preset);
+	}
+
 	function handleInput() {
 		if (!isElliptical) cutMinor = cutMajor;
 		emitParams();
@@ -210,7 +262,8 @@
 		{ value: 'standard', label: 'Tube → Tube' },
 		{ value: 'flat-plate', label: 'Tube → Flat' },
 		{ value: 'bridge', label: 'Bridge / Brace' },
-		{ value: 'compound-ss', label: 'Compound Angle' }
+		{ value: 'compound-ss', label: 'Compound Angle' },
+		{ value: 'collector', label: 'Collector' }
 	];
 </script>
 
@@ -668,6 +721,133 @@
 			</label>
 			<span class="hint">Center-to-center between left and right stays</span>
 		</div>
+
+	<!-- ========== Collector ========== -->
+	{:else if jointType === 'collector'}
+		<div class="control-group">
+			<label class="group-label" for="collector-preset-select">Preset</label>
+			<select
+				id="collector-preset-select"
+				value={selectedCollectorPreset}
+				onchange={handleCollectorPresetChange}
+			>
+				{#each COLLECTOR_PRESETS as preset}
+					<option value={preset.name}>{preset.name}</option>
+				{/each}
+			</select>
+		</div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Cut Tube OD')}
+				<input
+					type="number"
+					value={toDisplay(collCutDia).toFixed(units === 'in' ? 3 : 1)}
+					step={dimStep()}
+					min={0.1}
+					onchange={(e) => {
+						collCutDia = fromDisplay(
+							parseFloat((e.target as HTMLInputElement).value) || 0
+						);
+						emitCollectorParams();
+					}}
+				/>
+			</label>
+		</div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Wall Thickness')}
+				<input
+					type="number"
+					value={toDisplay(collWall).toFixed(units === 'in' ? 4 : 2)}
+					step={units === 'in' ? 0.001 : 0.05}
+					min={0.01}
+					onchange={(e) => {
+						collWall = fromDisplay(
+							parseFloat((e.target as HTMLInputElement).value) || 0
+						);
+						emitCollectorParams();
+					}}
+				/>
+			</label>
+		</div>
+
+		<div class="separator"></div>
+
+		{#each collParents as parent, idx}
+			<div class="parent-section">
+				<div class="parent-header">
+					<span class="group-label section-label">Tube {idx + 1}</span>
+					{#if collParents.length > 1}
+						<button
+							class="remove-btn"
+							onclick={() => removeCollectorParent(idx)}
+							title="Remove this tube"
+						>&times;</button>
+					{/if}
+				</div>
+
+				<div class="control-group">
+					<label>
+						{dimLabel('Parent OD')}
+						<input
+							type="number"
+							value={toDisplay(parent.parentDiameter).toFixed(units === 'in' ? 3 : 1)}
+							step={dimStep()}
+							min={0.1}
+							onchange={(e) => {
+								collParents[idx].parentDiameter = fromDisplay(
+									parseFloat((e.target as HTMLInputElement).value) || 0
+								);
+								emitCollectorParams();
+							}}
+						/>
+					</label>
+				</div>
+
+				<div class="control-group">
+					<label>
+						Angle (°)
+						<input
+							type="number"
+							value={parent.angle}
+							step={0.5}
+							min={1}
+							max={179}
+							oninput={(e) => {
+								collParents[idx].angle =
+									parseFloat((e.target as HTMLInputElement).value) || 60;
+								emitCollectorParams();
+							}}
+						/>
+					</label>
+				</div>
+
+				<div class="control-group">
+					<label>
+						Clock Position (°)
+						<input
+							type="number"
+							value={parent.clockPosition}
+							step={5}
+							oninput={(e) => {
+								collParents[idx].clockPosition =
+									parseFloat((e.target as HTMLInputElement).value) || 0;
+								emitCollectorParams();
+							}}
+						/>
+					</label>
+					<span class="hint">Angular position around the cut tube</span>
+				</div>
+
+				{#if idx < collParents.length - 1}
+					<div class="separator"></div>
+				{/if}
+			</div>
+		{/each}
+
+		<button class="add-btn" onclick={addCollectorParent}>+ Add Tube</button>
 	{/if}
 </div>
 
@@ -751,7 +931,7 @@
 
 	.joint-type-tabs {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: 1fr 1fr 1fr;
 		gap: 4px;
 	}
 
@@ -847,5 +1027,53 @@
 		gap: 10px;
 		padding-left: 8px;
 		border-left: 2px solid var(--border-input, #333);
+	}
+
+	.parent-section {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.parent-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.remove-btn {
+		background: none;
+		border: 1px solid var(--border-input, #333);
+		color: var(--color-text-dim, #666);
+		width: 22px;
+		height: 22px;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 1rem;
+		line-height: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.remove-btn:hover {
+		border-color: #e74c3c;
+		color: #e74c3c;
+	}
+
+	.add-btn {
+		background: var(--bg-input, #16213e);
+		border: 1px dashed var(--border-input, #333);
+		color: var(--color-text-secondary, #aaa);
+		padding: 8px;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 0.85rem;
+		text-align: center;
+	}
+
+	.add-btn:hover {
+		border-color: var(--color-accent, #00d4ff);
+		color: var(--color-accent, #00d4ff);
 	}
 </style>

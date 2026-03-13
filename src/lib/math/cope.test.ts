@@ -3,6 +3,7 @@ import {
 	generateCope,
 	generateBridgeMiter,
 	generateCompoundMiter,
+	generateCollectorMiter,
 	computeCompoundAngle,
 	mmToInches,
 	inchesToMm,
@@ -11,9 +12,11 @@ import {
 	FLAT_PLATE_PRESETS,
 	BRIDGE_PRESETS,
 	COMPOUND_PRESETS,
+	COLLECTOR_PRESETS,
 	type CopeParams,
 	type BridgeParams,
-	type CompoundAngleParams
+	type CompoundAngleParams,
+	type CollectorParams
 } from './cope.js';
 
 describe('generateCope', () => {
@@ -643,5 +646,164 @@ describe('generateCompoundMiter', () => {
 	it('custom resolution is passed through', () => {
 		const result = generateCompoundMiter({ ...baseCompound, resolution: 360 });
 		expect(result.points.length).toBe(360);
+	});
+});
+
+// ============================================================
+// Collector Miter
+// ============================================================
+
+describe('generateCollectorMiter', () => {
+	it('single parent matches standard cope', () => {
+		const collector = generateCollectorMiter({
+			cutDiameter: 25.4,
+			wallThickness: 0.9,
+			parents: [{ parentDiameter: 31.8, angle: 90, clockPosition: 0 }]
+		});
+		const standard = generateCope({
+			cutDiameter: 25.4,
+			parentDiameter: 31.8,
+			wallThickness: 0.9,
+			angle: 90
+		});
+
+		expect(collector.height).toBeCloseTo(standard.height, 4);
+		for (let i = 0; i < collector.points.length; i++) {
+			expect(collector.points[i].y).toBeCloseTo(standard.points[i].y, 4);
+		}
+	});
+
+	it('two identical parents at same position match single parent', () => {
+		const single = generateCollectorMiter({
+			cutDiameter: 25.4,
+			wallThickness: 0.9,
+			parents: [{ parentDiameter: 31.8, angle: 60, clockPosition: 0 }]
+		});
+		const double = generateCollectorMiter({
+			cutDiameter: 25.4,
+			wallThickness: 0.9,
+			parents: [
+				{ parentDiameter: 31.8, angle: 60, clockPosition: 0 },
+				{ parentDiameter: 31.8, angle: 60, clockPosition: 0 }
+			]
+		});
+
+		expect(double.height).toBeCloseTo(single.height, 4);
+	});
+
+	it('envelope y is at most the individual cope y at every point', () => {
+		// The envelope takes min(y) so at every θ the collector curve
+		// should be ≤ the single-parent curve (in raw coordinates)
+		const single = generateCollectorMiter({
+			cutDiameter: 28.6,
+			wallThickness: 0.9,
+			parents: [{ parentDiameter: 28.6, angle: 60, clockPosition: 0 }]
+		});
+		const collector = generateCollectorMiter({
+			cutDiameter: 28.6,
+			wallThickness: 0.9,
+			parents: [
+				{ parentDiameter: 28.6, angle: 60, clockPosition: 0 },
+				{ parentDiameter: 28.6, angle: 60, clockPosition: 180 }
+			]
+		});
+
+		// Recover raw y for each. At every point, collector raw ≤ single raw.
+		for (let i = 0; i < single.points.length; i++) {
+			const singleRaw = single.points[i].y + single.minY;
+			const collectorRaw = collector.points[i].y + collector.minY;
+			expect(collectorRaw).toBeLessThanOrEqual(singleRaw + 0.01);
+		}
+	});
+
+	it('two parents at opposite clock positions produce wider saddle', () => {
+		const single = generateCollectorMiter({
+			cutDiameter: 28.6,
+			wallThickness: 0.9,
+			parents: [{ parentDiameter: 28.6, angle: 60, clockPosition: 0 }]
+		});
+		const opposed = generateCollectorMiter({
+			cutDiameter: 28.6,
+			wallThickness: 0.9,
+			parents: [
+				{ parentDiameter: 28.6, angle: 60, clockPosition: 0 },
+				{ parentDiameter: 28.6, angle: 60, clockPosition: 90 }
+			]
+		});
+
+		// With a second parent at 90°, the envelope should differ
+		expect(opposed.height).not.toBeCloseTo(single.height, 1);
+	});
+
+	it('correct number of points', () => {
+		const result = generateCollectorMiter({
+			cutDiameter: 28.6,
+			wallThickness: 0.9,
+			parents: [
+				{ parentDiameter: 25.4, angle: 45, clockPosition: 0 },
+				{ parentDiameter: 25.4, angle: 45, clockPosition: 120 }
+			]
+		});
+		expect(result.points.length).toBe(1440);
+	});
+
+	it('custom resolution works', () => {
+		const result = generateCollectorMiter({
+			cutDiameter: 28.6,
+			wallThickness: 0.9,
+			parents: [
+				{ parentDiameter: 25.4, angle: 45, clockPosition: 0 },
+				{ parentDiameter: 25.4, angle: 45, clockPosition: 120 }
+			],
+			resolution: 360
+		});
+		expect(result.points.length).toBe(360);
+	});
+
+	it('throws on empty parents array', () => {
+		expect(() =>
+			generateCollectorMiter({
+				cutDiameter: 28.6,
+				wallThickness: 0.9,
+				parents: []
+			})
+		).toThrow('at least one parent');
+	});
+
+	it('three parents at 120° spacing produce 3-fold symmetry', () => {
+		const result = generateCollectorMiter({
+			cutDiameter: 38,
+			wallThickness: 0.9,
+			parents: [
+				{ parentDiameter: 25.4, angle: 45, clockPosition: 0 },
+				{ parentDiameter: 25.4, angle: 45, clockPosition: 120 },
+				{ parentDiameter: 25.4, angle: 45, clockPosition: 240 }
+			]
+		});
+
+		const n = result.points.length;
+		const third = Math.floor(n / 3);
+
+		// Points separated by 1/3 circumference should have the same y
+		for (let i = 0; i < 10; i++) {
+			const idx = i * 10;
+			expect(result.points[idx].y).toBeCloseTo(
+				result.points[(idx + third) % n].y,
+				1
+			);
+		}
+	});
+
+	it('all collector presets generate valid templates', () => {
+		for (const preset of COLLECTOR_PRESETS) {
+			const result = generateCollectorMiter({
+				cutDiameter: preset.cutDiameter,
+				wallThickness: preset.wallThickness,
+				parents: preset.parents
+			});
+			expect(result.points.length).toBe(1440);
+			expect(result.height).toBeGreaterThan(0);
+			expect(result.circumference).toBeGreaterThan(0);
+		}
 	});
 });

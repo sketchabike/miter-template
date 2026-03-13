@@ -1,6 +1,7 @@
 {
-  "name": "miter-template",
+  "name": "@sketchabike/miters",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 5175",

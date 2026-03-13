@@ -390,7 +390,7 @@ export const PRESETS: JointPreset[] = [
 // Joint Types
 // ============================================================
 
-export type JointType = 'standard' | 'flat-plate' | 'bridge' | 'compound-ss';
+export type JointType = 'standard' | 'flat-plate' | 'bridge' | 'compound-ss' | 'collector';
 
 // ============================================================
 // Bridge Miter — double-ended template for braces/bridges
@@ -538,6 +538,108 @@ export function generateCompoundMiter(params: CompoundAngleParams): CopeResult {
 }
 
 // ============================================================
+// Collector — multiple parent tubes meeting one cut tube
+// ============================================================
+
+/** One parent tube in a collector junction */
+export interface CollectorTube {
+	/** Parent tube OD in mm */
+	parentDiameter: number;
+	/** Angle between this parent and the cut tube in degrees */
+	angle: number;
+	/** Clock position in degrees — where on the cut tube this parent approaches */
+	clockPosition: number;
+	/** Offset from cut tube center in mm */
+	offset?: number;
+}
+
+export interface CollectorParams {
+	/** Cut tube OD in mm */
+	cutDiameter: number;
+	/** Wall thickness of the cut tube in mm */
+	wallThickness: number;
+	/** Parent tubes meeting this cut tube */
+	parents: CollectorTube[];
+	/** Number of sample points */
+	resolution?: number;
+}
+
+/**
+ * Generate a collector miter template.
+ *
+ * For each parent tube, computes a standard cope with the parent's clock position
+ * as the twist. The final template is the minimum envelope — at each angular position
+ * around the cut tube, the cut follows whichever parent surface requires the deepest cut.
+ */
+export function generateCollectorMiter(params: CollectorParams): CopeResult {
+	const { cutDiameter, wallThickness, parents, resolution = 1440 } = params;
+
+	if (parents.length === 0) {
+		throw new Error('Collector requires at least one parent tube');
+	}
+
+	// Generate individual cope for each parent
+	const copes = parents.map((parent) =>
+		generateCope({
+			cutDiameter,
+			parentDiameter: parent.parentDiameter,
+			wallThickness,
+			angle: parent.angle,
+			offset: parent.offset,
+			twist: parent.clockPosition,
+			resolution
+		})
+	);
+
+	const circumference = copes[0].circumference;
+
+	// Build envelope: at each sample point, take the minimum raw y
+	const envelopeRaw: { circumDist: number; rawY: number }[] = [];
+	let minY = Infinity;
+	let maxY = -Infinity;
+
+	for (let i = 0; i < resolution; i++) {
+		const circumDist = copes[0].points[i].x;
+		let envY = Infinity;
+
+		for (const cope of copes) {
+			// Recover raw y (before normalization) from the shifted point
+			const rawY = cope.points[i].y + cope.minY;
+			if (rawY < envY) envY = rawY;
+		}
+
+		envelopeRaw.push({ circumDist, rawY: envY });
+		if (envY < minY) minY = envY;
+		if (envY > maxY) maxY = envY;
+	}
+
+	// Normalize so min y = 0
+	const points: TemplatePoint[] = envelopeRaw.map((p) => ({
+		x: p.circumDist,
+		y: p.rawY - minY
+	}));
+
+	const height = maxY - minY;
+
+	// Synthetic params using first parent as reference
+	const resultParams: CopeParams = {
+		cutDiameter,
+		parentDiameter: parents[0].parentDiameter,
+		wallThickness,
+		angle: parents[0].angle
+	};
+
+	return {
+		points,
+		circumference,
+		height,
+		minY,
+		maxY,
+		params: resultParams
+	};
+}
+
+// ============================================================
 // Joint-type-specific presets
 // ============================================================
 
@@ -657,5 +759,47 @@ export const COMPOUND_PRESETS: CompoundPreset[] = [
 		elevation: 65,
 		splay: 5,
 		staySpacing: 42
+	}
+];
+
+export interface CollectorPreset {
+	name: string;
+	description: string;
+	cutDiameter: number;
+	wallThickness: number;
+	parents: CollectorTube[];
+}
+
+export const COLLECTOR_PRESETS: CollectorPreset[] = [
+	{
+		name: 'Y-Junction (2 tubes)',
+		description: 'Two equal tubes merging at a Y',
+		cutDiameter: 28.6,
+		wallThickness: 0.9,
+		parents: [
+			{ parentDiameter: 28.6, angle: 60, clockPosition: -30, offset: 0 },
+			{ parentDiameter: 28.6, angle: 60, clockPosition: 30, offset: 0 }
+		]
+	},
+	{
+		name: '3-into-1 Collector',
+		description: 'Three tubes at 120° spacing',
+		cutDiameter: 38,
+		wallThickness: 0.9,
+		parents: [
+			{ parentDiameter: 25.4, angle: 45, clockPosition: 0, offset: 0 },
+			{ parentDiameter: 25.4, angle: 45, clockPosition: 120, offset: 0 },
+			{ parentDiameter: 25.4, angle: 45, clockPosition: 240, offset: 0 }
+		]
+	},
+	{
+		name: 'Custom Collector',
+		description: 'Enter your own dimensions',
+		cutDiameter: 28.6,
+		wallThickness: 0.9,
+		parents: [
+			{ parentDiameter: 25.4, angle: 60, clockPosition: 0, offset: 0 },
+			{ parentDiameter: 25.4, angle: 60, clockPosition: 180, offset: 0 }
+		]
 	}
 ];
