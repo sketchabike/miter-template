@@ -5,15 +5,21 @@
 		BRIDGE_PRESETS,
 		COMPOUND_PRESETS,
 		COLLECTOR_PRESETS,
+		SQUARE_PRESETS,
+		SLOT_PRESETS,
 		type JointPreset,
 		type CopeParams,
 		type BridgeParams,
 		type CompoundAngleParams,
 		type CollectorParams,
 		type CollectorTube,
+		type SquareParams,
+		type SlotParams,
 		type BridgePreset,
 		type CompoundPreset,
 		type CollectorPreset,
+		type SquarePreset,
+		type SlotPreset,
 		type JointType
 	} from '$lib/math/cope.js';
 
@@ -28,6 +34,10 @@
 		oncompoundchange: (params: CompoundAngleParams) => void;
 		collectorParams: CollectorParams;
 		oncollectorchange: (params: CollectorParams) => void;
+		squareParams: SquareParams;
+		onsquarechange: (params: SquareParams) => void;
+		slotParams: SlotParams;
+		onslotchange: (params: SlotParams) => void;
 		units: 'mm' | 'in';
 		onunitschange: (units: 'mm' | 'in') => void;
 	}
@@ -43,6 +53,10 @@
 		oncompoundchange,
 		collectorParams: initialCollectorParams,
 		oncollectorchange,
+		squareParams: initialSquareParams,
+		onsquarechange,
+		slotParams: initialSlotParams,
+		onslotchange,
 		units,
 		onunitschange
 	}: Props = $props();
@@ -95,6 +109,23 @@
 		initialCollectorParams.parents.map((p) => ({ ...p }))
 	);
 	let selectedCollectorPreset = $state('Custom Collector');
+
+	// --- Square state ---
+	let sqCutDia = $state(initialSquareParams.cutDiameter);
+	let sqParentSide = $state(initialSquareParams.parentSide);
+	let sqWall = $state(initialSquareParams.wallThickness);
+	let sqCornerRadius = $state(initialSquareParams.cornerRadius);
+	let sqAngle = $state(initialSquareParams.angle);
+	let sqOffset = $state(initialSquareParams.offset ?? 0);
+	let sqTwist = $state(initialSquareParams.twist ?? 0);
+	let selectedSquarePreset = $state('Custom Square');
+
+	// --- Slot state ---
+	let slotTubeDia = $state(initialSlotParams.tubeDiameter);
+	let slotWall = $state(initialSlotParams.wallThickness);
+	let slotPlateThickness = $state(initialSlotParams.plateThickness);
+	let slotDepth = $state(initialSlotParams.slotDepth);
+	let selectedSlotPreset = $state('Custom Slot');
 
 	const MM_PER_INCH = 25.4;
 
@@ -158,6 +189,27 @@
 			cutDiameter: collCutDia,
 			wallThickness: collWall,
 			parents: collParents.map((p) => ({ ...p }))
+		});
+	}
+
+	function emitSquareParams() {
+		onsquarechange({
+			cutDiameter: sqCutDia,
+			parentSide: sqParentSide,
+			wallThickness: sqWall,
+			cornerRadius: sqCornerRadius,
+			angle: sqAngle,
+			offset: sqOffset || undefined,
+			twist: sqTwist || undefined
+		});
+	}
+
+	function emitSlotParams() {
+		onslotchange({
+			tubeDiameter: slotTubeDia,
+			wallThickness: slotWall,
+			plateThickness: slotPlateThickness,
+			slotDepth
 		});
 	}
 
@@ -253,6 +305,39 @@
 		if (preset) applyCollectorPreset(preset);
 	}
 
+	function applySquarePreset(preset: SquarePreset) {
+		sqCutDia = preset.cutDiameter;
+		sqParentSide = preset.parentSide;
+		sqWall = preset.wallThickness;
+		sqCornerRadius = preset.cornerRadius;
+		sqAngle = preset.angle;
+		sqOffset = preset.offset ?? 0;
+		sqTwist = preset.twist ?? 0;
+		emitSquareParams();
+	}
+
+	function handleSquarePresetChange(e: Event) {
+		const name = (e.target as HTMLSelectElement).value;
+		selectedSquarePreset = name;
+		const preset = SQUARE_PRESETS.find((p) => p.name === name);
+		if (preset) applySquarePreset(preset);
+	}
+
+	function applySlotPreset(preset: SlotPreset) {
+		slotTubeDia = preset.tubeDiameter;
+		slotWall = preset.wallThickness;
+		slotPlateThickness = preset.plateThickness;
+		slotDepth = preset.slotDepth;
+		emitSlotParams();
+	}
+
+	function handleSlotPresetChange(e: Event) {
+		const name = (e.target as HTMLSelectElement).value;
+		selectedSlotPreset = name;
+		const preset = SLOT_PRESETS.find((p) => p.name === name);
+		if (preset) applySlotPreset(preset);
+	}
+
 	function handleInput() {
 		if (!isElliptical) cutMinor = cutMajor;
 		emitParams();
@@ -261,9 +346,11 @@
 	const JOINT_TYPES: { value: JointType; label: string }[] = [
 		{ value: 'standard', label: 'Tube → Tube' },
 		{ value: 'flat-plate', label: 'Tube → Flat' },
+		{ value: 'square', label: 'Tube → Square' },
 		{ value: 'bridge', label: 'Bridge / Brace' },
 		{ value: 'compound-ss', label: 'Compound Angle' },
-		{ value: 'collector', label: 'Collector' }
+		{ value: 'collector', label: 'Collector' },
+		{ value: 'slot', label: 'Tube Slot' }
 	];
 </script>
 
@@ -848,6 +935,238 @@
 		{/each}
 
 		<button class="add-btn" onclick={addCollectorParent}>+ Add Tube</button>
+
+	<!-- ========== Round-to-Square ========== -->
+	{:else if jointType === 'square'}
+		<div class="control-group">
+			<label class="group-label" for="square-preset-select">Preset</label>
+			<select
+				id="square-preset-select"
+				value={selectedSquarePreset}
+				onchange={handleSquarePresetChange}
+			>
+				{#each SQUARE_PRESETS as preset}
+					<option value={preset.name}>{preset.name}</option>
+				{/each}
+			</select>
+		</div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Cut Tube OD')}
+				<input
+					type="number"
+					value={toDisplay(sqCutDia).toFixed(units === 'in' ? 3 : 1)}
+					step={dimStep()}
+					min={0.1}
+					onchange={(e) => {
+						sqCutDia = fromDisplay(parseFloat((e.target as HTMLInputElement).value) || 0);
+						emitSquareParams();
+					}}
+				/>
+			</label>
+		</div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Parent Side Length')}
+				<input
+					type="number"
+					value={toDisplay(sqParentSide).toFixed(units === 'in' ? 3 : 1)}
+					step={dimStep()}
+					min={0.1}
+					onchange={(e) => {
+						sqParentSide = fromDisplay(
+							parseFloat((e.target as HTMLInputElement).value) || 0
+						);
+						emitSquareParams();
+					}}
+				/>
+			</label>
+			<span class="hint">Side length of the square tube</span>
+		</div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Wall Thickness')}
+				<input
+					type="number"
+					value={toDisplay(sqWall).toFixed(units === 'in' ? 4 : 2)}
+					step={units === 'in' ? 0.001 : 0.05}
+					min={0.01}
+					onchange={(e) => {
+						sqWall = fromDisplay(parseFloat((e.target as HTMLInputElement).value) || 0);
+						emitSquareParams();
+					}}
+				/>
+			</label>
+		</div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Corner Radius')}
+				<input
+					type="number"
+					value={toDisplay(sqCornerRadius).toFixed(units === 'in' ? 3 : 1)}
+					step={dimStep()}
+					min={0}
+					onchange={(e) => {
+						sqCornerRadius = fromDisplay(
+							parseFloat((e.target as HTMLInputElement).value) || 0
+						);
+						emitSquareParams();
+					}}
+				/>
+			</label>
+			<span class="hint">0 = sharp corners, max = {toDisplay(sqParentSide / 2).toFixed(units === 'in' ? 3 : 1)} (fully round)</span>
+		</div>
+
+		<div class="control-group">
+			<label>
+				Angle (°)
+				<input
+					type="number"
+					bind:value={sqAngle}
+					step={0.5}
+					min={1}
+					max={179}
+					oninput={() => emitSquareParams()}
+				/>
+			</label>
+			<span class="hint">Angle between tube centerlines</span>
+		</div>
+
+		<div class="separator"></div>
+
+		<button class="advanced-toggle" onclick={() => (showAdvanced = !showAdvanced)}>
+			{showAdvanced ? '▾' : '▸'} Advanced Options
+		</button>
+
+		{#if showAdvanced}
+			<div class="advanced-panel">
+				<div class="control-group">
+					<label>
+						{dimLabel('Offset')}
+						<input
+							type="number"
+							value={toDisplay(sqOffset).toFixed(units === 'in' ? 3 : 1)}
+							step={dimStep()}
+							onchange={(e) => {
+								sqOffset = fromDisplay(
+									parseFloat((e.target as HTMLInputElement).value) || 0
+								);
+								emitSquareParams();
+							}}
+						/>
+					</label>
+					<span class="hint">Distance from parent center</span>
+				</div>
+
+				<div class="control-group">
+					<label>
+						Twist (°)
+						<input
+							type="number"
+							bind:value={sqTwist}
+							step={1}
+							oninput={() => emitSquareParams()}
+						/>
+					</label>
+					<span class="hint">Clock rotation of the cut</span>
+				</div>
+			</div>
+		{/if}
+
+	<!-- ========== Tube Slot ========== -->
+	{:else if jointType === 'slot'}
+		<div class="control-group">
+			<label class="group-label" for="slot-preset-select">Preset</label>
+			<select
+				id="slot-preset-select"
+				value={selectedSlotPreset}
+				onchange={handleSlotPresetChange}
+			>
+				{#each SLOT_PRESETS as preset}
+					<option value={preset.name}>{preset.name}</option>
+				{/each}
+			</select>
+		</div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Tube OD')}
+				<input
+					type="number"
+					value={toDisplay(slotTubeDia).toFixed(units === 'in' ? 3 : 1)}
+					step={dimStep()}
+					min={0.1}
+					onchange={(e) => {
+						slotTubeDia = fromDisplay(
+							parseFloat((e.target as HTMLInputElement).value) || 0
+						);
+						emitSlotParams();
+					}}
+				/>
+			</label>
+		</div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Wall Thickness')}
+				<input
+					type="number"
+					value={toDisplay(slotWall).toFixed(units === 'in' ? 4 : 2)}
+					step={units === 'in' ? 0.001 : 0.05}
+					min={0.01}
+					onchange={(e) => {
+						slotWall = fromDisplay(
+							parseFloat((e.target as HTMLInputElement).value) || 0
+						);
+						emitSlotParams();
+					}}
+				/>
+			</label>
+		</div>
+
+		<div class="separator"></div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Plate Thickness')}
+				<input
+					type="number"
+					value={toDisplay(slotPlateThickness).toFixed(units === 'in' ? 3 : 1)}
+					step={dimStep()}
+					min={0.1}
+					onchange={(e) => {
+						slotPlateThickness = fromDisplay(
+							parseFloat((e.target as HTMLInputElement).value) || 0
+						);
+						emitSlotParams();
+					}}
+				/>
+			</label>
+			<span class="hint">Thickness of the dropout/plate being inserted</span>
+		</div>
+
+		<div class="control-group">
+			<label>
+				{dimLabel('Slot Depth')}
+				<input
+					type="number"
+					value={toDisplay(slotDepth).toFixed(units === 'in' ? 3 : 1)}
+					step={dimStep()}
+					min={0.1}
+					onchange={(e) => {
+						slotDepth = fromDisplay(
+							parseFloat((e.target as HTMLInputElement).value) || 0
+						);
+						emitSlotParams();
+					}}
+				/>
+			</label>
+			<span class="hint">How deep to cut the slot into the tube end</span>
+		</div>
 	{/if}
 </div>
 
@@ -931,7 +1250,7 @@
 
 	.joint-type-tabs {
 		display: grid;
-		grid-template-columns: 1fr 1fr 1fr;
+		grid-template-columns: 1fr 1fr;
 		gap: 4px;
 	}
 

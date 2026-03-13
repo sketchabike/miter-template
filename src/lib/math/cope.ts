@@ -390,7 +390,7 @@ export const PRESETS: JointPreset[] = [
 // Joint Types
 // ============================================================
 
-export type JointType = 'standard' | 'flat-plate' | 'bridge' | 'compound-ss' | 'collector';
+export type JointType = 'standard' | 'flat-plate' | 'bridge' | 'compound-ss' | 'collector' | 'square' | 'slot';
 
 // ============================================================
 // Bridge Miter — double-ended template for braces/bridges
@@ -640,6 +640,247 @@ export function generateCollectorMiter(params: CollectorParams): CopeResult {
 }
 
 // ============================================================
+// Round-to-Square — tube meeting a square/rectangular section
+// ============================================================
+
+export interface SquareParams {
+	/** Cut tube OD in mm */
+	cutDiameter: number;
+	/** Parent square section side length in mm */
+	parentSide: number;
+	/** Wall thickness of the cut tube in mm */
+	wallThickness: number;
+	/** Corner radius of the parent square section in mm (0 = sharp corners) */
+	cornerRadius: number;
+	/** Angle between tube centerline and parent axis in degrees */
+	angle: number;
+	/** Offset from parent center in mm */
+	offset?: number;
+	/** Twist/clock rotation in degrees */
+	twist?: number;
+	/** Number of sample points */
+	resolution?: number;
+}
+
+/**
+ * Compute the surface depth of a square cross-section at normalized lateral position a.
+ *
+ * The square has half-side = 1 (normalized). Corner radius is rNorm (0..1).
+ * Returns the "depth" analogous to cos(asin(a)) for a cylinder.
+ *
+ * - Flat face (|a| <= 1 - rNorm): depth = 1.0
+ * - Corner (1 - rNorm < |a| <= 1): arc transition
+ * - Miss (|a| > 1): returns null
+ */
+export function squareSurfaceDepth(a: number, rNorm: number): number | null {
+	const absA = Math.abs(a);
+
+	if (absA > 1) {
+		return null; // misses the parent entirely
+	}
+
+	if (absA <= 1 - rNorm) {
+		// On the flat face
+		return 1.0;
+	}
+
+	// In the corner radius region
+	// Corner center is at (1 - rNorm) from center, radius rNorm
+	const da = absA - (1 - rNorm);
+	const depthFromCorner = Math.sqrt(rNorm * rNorm - da * da);
+	return (1 - rNorm) + depthFromCorner;
+}
+
+/**
+ * Generate a miter template for a round tube meeting a square section.
+ *
+ * Uses the same algorithm as generateCope() but replaces the cylindrical
+ * projection (cos(asin(a))) with squareSurfaceDepth().
+ *
+ * When cornerRadius = parentSide/2, the square degenerates to a cylinder
+ * and the result matches a standard round-to-round cope.
+ */
+export function generateSquareMiter(params: SquareParams): CopeResult {
+	const {
+		cutDiameter,
+		parentSide,
+		wallThickness,
+		cornerRadius,
+		angle,
+		offset = 0,
+		twist = 0,
+		resolution = 1440
+	} = params;
+
+	const parentRadius = parentSide / 2;
+	const rNorm = Math.min(cornerRadius / parentRadius, 1.0);
+
+	// Inner diameter of cut tube
+	const innerDiameter = cutDiameter - wallThickness * 2;
+	// Normalized inner radius (parent "radius" = parentSide/2)
+	const rMajor = (innerDiameter / 2) / parentRadius;
+
+	const normOffset = offset / parentRadius;
+
+	const slopeAngle = angle + 90;
+	const slope = Math.tan(slopeAngle * Math.PI / 180);
+
+	const twistRad = twist * Math.PI / 180;
+	const circumference = Math.PI * cutDiameter;
+
+	const step = TWO_PI / resolution;
+	const rawPoints: { circumDist: number; rawY: number }[] = [];
+	let minY = Infinity;
+	let maxY = -Infinity;
+
+	for (let i = 0; i < resolution; i++) {
+		const theta = i * step;
+
+		const a = rMajor * Math.cos(theta + twistRad) + normOffset;
+		const b = rMajor * Math.sin(theta + twistRad);
+
+		let y: number;
+		const depth = squareSurfaceDepth(a, rNorm);
+
+		if (depth === null) {
+			// Misses the parent
+			y = 1;
+		} else {
+			// depth replaces cos(asin(a)) from the cylindrical case
+			y = 1 - depth - b * slope;
+		}
+
+		const circumDist = (theta / TWO_PI) * circumference;
+		const yMm = parentRadius * y;
+
+		rawPoints.push({ circumDist, rawY: yMm });
+		if (yMm < minY) minY = yMm;
+		if (yMm > maxY) maxY = yMm;
+	}
+
+	const points: TemplatePoint[] = rawPoints.map((p) => ({
+		x: p.circumDist,
+		y: p.rawY - minY
+	}));
+
+	const height = maxY - minY;
+
+	// Store as CopeParams for compatibility (parentDiameter = parentSide)
+	const resultParams: CopeParams = {
+		cutDiameter,
+		parentDiameter: parentSide,
+		wallThickness,
+		angle
+	};
+
+	return {
+		points,
+		circumference,
+		height,
+		minY,
+		maxY,
+		params: resultParams
+	};
+}
+
+// ============================================================
+// Tube Slot — slot cut for hooded dropouts / plate insertions
+// ============================================================
+
+export interface SlotParams {
+	/** Tube OD in mm */
+	tubeDiameter: number;
+	/** Wall thickness of the tube in mm */
+	wallThickness: number;
+	/** Thickness of the plate/dropout being inserted in mm */
+	plateThickness: number;
+	/** Depth of the slot cut in mm */
+	slotDepth: number;
+	/** Number of sample points */
+	resolution?: number;
+}
+
+/**
+ * Generate a tube slot template.
+ *
+ * Produces a template that marks where to cut a slot in a tube to receive
+ * a flat plate (e.g., hooded dropout). The slot is a rectangular opening:
+ * slotDepth tall, plateThickness wide (on the tube surface).
+ *
+ * The template is a CopeResult where y = slotDepth within the slot angular
+ * range and y = 0 outside. This creates a simple rectangular cutout template
+ * that wraps around the tube.
+ */
+export function generateSlotTemplate(params: SlotParams): CopeResult {
+	const {
+		tubeDiameter,
+		wallThickness,
+		plateThickness,
+		slotDepth,
+		resolution = 1440
+	} = params;
+
+	const innerRadius = (tubeDiameter - wallThickness * 2) / 2;
+	const circumference = Math.PI * tubeDiameter;
+
+	// Half-angle subtended by the plate thickness on the inner surface
+	// plateThickness is a chord; half-chord / radius gives sin of half-angle
+	const halfChord = plateThickness / 2;
+	if (halfChord >= innerRadius) {
+		throw new Error('Plate thickness must be less than tube inner diameter');
+	}
+	const slotHalfAngle = Math.asin(halfChord / innerRadius);
+
+	const step = TWO_PI / resolution;
+	const rawPoints: { circumDist: number; rawY: number }[] = [];
+	let minY = Infinity;
+	let maxY = -Infinity;
+
+	for (let i = 0; i < resolution; i++) {
+		const theta = i * step;
+		const circumDist = (theta / TWO_PI) * circumference;
+
+		// Normalize theta to [-π, π] to check if we're in the slot region
+		let normalizedTheta = theta;
+		if (normalizedTheta > Math.PI) normalizedTheta -= TWO_PI;
+
+		let rawY: number;
+		if (Math.abs(normalizedTheta) <= slotHalfAngle) {
+			rawY = slotDepth;
+		} else {
+			rawY = 0;
+		}
+
+		rawPoints.push({ circumDist, rawY });
+		if (rawY < minY) minY = rawY;
+		if (rawY > maxY) maxY = rawY;
+	}
+
+	const points: TemplatePoint[] = rawPoints.map((p) => ({
+		x: p.circumDist,
+		y: p.rawY - minY
+	}));
+
+	const height = maxY - minY;
+
+	const resultParams: CopeParams = {
+		cutDiameter: tubeDiameter,
+		parentDiameter: tubeDiameter,
+		wallThickness,
+		angle: 90
+	};
+
+	return {
+		points,
+		circumference,
+		height,
+		minY,
+		maxY,
+		params: resultParams
+	};
+}
+
+// ============================================================
 // Joint-type-specific presets
 // ============================================================
 
@@ -801,5 +1042,92 @@ export const COLLECTOR_PRESETS: CollectorPreset[] = [
 			{ parentDiameter: 25.4, angle: 60, clockPosition: 0, offset: 0 },
 			{ parentDiameter: 25.4, angle: 60, clockPosition: 180, offset: 0 }
 		]
+	}
+];
+
+export interface SquarePreset {
+	name: string;
+	description: string;
+	cutDiameter: number;
+	parentSide: number;
+	wallThickness: number;
+	cornerRadius: number;
+	angle: number;
+	offset?: number;
+	twist?: number;
+}
+
+export const SQUARE_PRESETS: SquarePreset[] = [
+	{
+		name: 'Tube → Square (sharp)',
+		description: 'Round tube to sharp-cornered square tube',
+		cutDiameter: 25.4,
+		parentSide: 38,
+		wallThickness: 0.9,
+		cornerRadius: 0,
+		angle: 90
+	},
+	{
+		name: 'Tube → Square (radiused)',
+		description: 'Round tube to square tube with rounded corners',
+		cutDiameter: 25.4,
+		parentSide: 38,
+		wallThickness: 0.9,
+		cornerRadius: 6,
+		angle: 90
+	},
+	{
+		name: 'Tube → Square (45°)',
+		description: 'Angled round tube to square tube',
+		cutDiameter: 25.4,
+		parentSide: 38,
+		wallThickness: 0.9,
+		cornerRadius: 4,
+		angle: 45
+	},
+	{
+		name: 'Custom Square',
+		description: 'Enter your own dimensions',
+		cutDiameter: 25.4,
+		parentSide: 38,
+		wallThickness: 0.9,
+		cornerRadius: 4,
+		angle: 90
+	}
+];
+
+export interface SlotPreset {
+	name: string;
+	description: string;
+	tubeDiameter: number;
+	wallThickness: number;
+	plateThickness: number;
+	slotDepth: number;
+}
+
+export const SLOT_PRESETS: SlotPreset[] = [
+	{
+		name: 'Chainstay Dropout Slot',
+		description: 'Slot for dropout plate in chainstay',
+		tubeDiameter: 22.2,
+		wallThickness: 0.8,
+		plateThickness: 3.0,
+		slotDepth: 15
+	},
+	{
+		name: 'Seatstay Dropout Slot',
+		description: 'Slot for dropout plate in seatstay',
+		tubeDiameter: 14,
+		wallThickness: 0.8,
+		plateThickness: 3.0,
+		slotDepth: 12
+	},
+	{
+		name: 'Custom Slot',
+		description: 'Enter your own dimensions',
+		tubeDiameter: 25.4,
+		wallThickness: 0.9,
+		plateThickness: 3.0,
+		slotDepth: 15
 	}
 ];

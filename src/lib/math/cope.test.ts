@@ -4,6 +4,9 @@ import {
 	generateBridgeMiter,
 	generateCompoundMiter,
 	generateCollectorMiter,
+	generateSquareMiter,
+	generateSlotTemplate,
+	squareSurfaceDepth,
 	computeCompoundAngle,
 	mmToInches,
 	inchesToMm,
@@ -13,10 +16,14 @@ import {
 	BRIDGE_PRESETS,
 	COMPOUND_PRESETS,
 	COLLECTOR_PRESETS,
+	SQUARE_PRESETS,
+	SLOT_PRESETS,
 	type CopeParams,
 	type BridgeParams,
 	type CompoundAngleParams,
-	type CollectorParams
+	type CollectorParams,
+	type SquareParams,
+	type SlotParams
 } from './cope.js';
 
 describe('generateCope', () => {
@@ -800,6 +807,247 @@ describe('generateCollectorMiter', () => {
 				cutDiameter: preset.cutDiameter,
 				wallThickness: preset.wallThickness,
 				parents: preset.parents
+			});
+			expect(result.points.length).toBe(1440);
+			expect(result.height).toBeGreaterThan(0);
+			expect(result.circumference).toBeGreaterThan(0);
+		}
+	});
+});
+
+// ============================================================
+// Round-to-Square Miter
+// ============================================================
+
+describe('squareSurfaceDepth', () => {
+	it('returns 1.0 on flat face (rNorm = 0, sharp corners)', () => {
+		expect(squareSurfaceDepth(0, 0)).toBe(1.0);
+		expect(squareSurfaceDepth(0.5, 0)).toBe(1.0);
+		expect(squareSurfaceDepth(0.99, 0)).toBe(1.0);
+	});
+
+	it('returns null for miss (|a| > 1)', () => {
+		expect(squareSurfaceDepth(1.01, 0)).toBeNull();
+		expect(squareSurfaceDepth(-1.5, 0.5)).toBeNull();
+	});
+
+	it('returns 1.0 at center for any corner radius', () => {
+		expect(squareSurfaceDepth(0, 0)).toBe(1.0);
+		expect(squareSurfaceDepth(0, 0.5)).toBe(1.0);
+		expect(squareSurfaceDepth(0, 1.0)).toBe(1.0);
+	});
+
+	it('degenerates to cylinder when rNorm = 1.0', () => {
+		// When rNorm = 1.0, the entire face is a rounded corner
+		// squareSurfaceDepth should match cos(asin(a))
+		for (const a of [0, 0.1, 0.3, 0.5, 0.7, 0.9]) {
+			const squareDepth = squareSurfaceDepth(a, 1.0);
+			const cylinderDepth = Math.cos(Math.asin(a));
+			expect(squareDepth).toBeCloseTo(cylinderDepth, 6);
+		}
+	});
+
+	it('flat face depth is constant at 1.0', () => {
+		// rNorm = 0.3, so flat face extends to |a| = 0.7
+		expect(squareSurfaceDepth(0, 0.3)).toBe(1.0);
+		expect(squareSurfaceDepth(0.3, 0.3)).toBe(1.0);
+		expect(squareSurfaceDepth(0.69, 0.3)).toBe(1.0);
+	});
+
+	it('corner region decreases from flat face to edge', () => {
+		const rNorm = 0.3;
+		const atFlatEdge = squareSurfaceDepth(0.7, rNorm);
+		const inCorner = squareSurfaceDepth(0.85, rNorm);
+		const nearEdge = squareSurfaceDepth(0.99, rNorm);
+
+		expect(atFlatEdge).toBeCloseTo(1.0, 4);
+		expect(inCorner!).toBeLessThan(atFlatEdge!);
+		expect(nearEdge!).toBeLessThan(inCorner!);
+	});
+
+	it('is symmetric around center', () => {
+		expect(squareSurfaceDepth(0.5, 0.3)).toBeCloseTo(
+			squareSurfaceDepth(-0.5, 0.3)!,
+			6
+		);
+	});
+});
+
+describe('generateSquareMiter', () => {
+	const baseSquare: SquareParams = {
+		cutDiameter: 25.4,
+		parentSide: 38,
+		wallThickness: 0.9,
+		cornerRadius: 4,
+		angle: 90
+	};
+
+	it('generates correct number of points', () => {
+		const result = generateSquareMiter(baseSquare);
+		expect(result.points.length).toBe(1440);
+	});
+
+	it('height is positive', () => {
+		const result = generateSquareMiter(baseSquare);
+		expect(result.height).toBeGreaterThan(0);
+	});
+
+	it('circumference matches cut tube', () => {
+		const result = generateSquareMiter(baseSquare);
+		expect(result.circumference).toBeCloseTo(Math.PI * 25.4, 1);
+	});
+
+	it('all y values are non-negative', () => {
+		const result = generateSquareMiter(baseSquare);
+		for (const p of result.points) {
+			expect(p.y).toBeGreaterThanOrEqual(-0.001);
+		}
+	});
+
+	it('sharp corners (rNorm=0) produce flat-bottom template at 90°', () => {
+		const result = generateSquareMiter({
+			...baseSquare,
+			cornerRadius: 0,
+			angle: 90
+		});
+		// At 90° on a flat face, much of the template should be at y=0
+		// (the flat face has constant depth = 1.0)
+		const flatPoints = result.points.filter((p) => p.y < 0.01);
+		expect(flatPoints.length).toBeGreaterThan(result.points.length * 0.3);
+	});
+
+	it('max corner radius matches standard cylindrical cope', () => {
+		// cornerRadius = parentSide/2 = 19 → full cylinder
+		const square = generateSquareMiter({
+			cutDiameter: 25.4,
+			parentSide: 38,
+			wallThickness: 0.9,
+			cornerRadius: 19, // parentSide/2 = full round
+			angle: 90
+		});
+		const round = generateCope({
+			cutDiameter: 25.4,
+			parentDiameter: 38,
+			wallThickness: 0.9,
+			angle: 90
+		});
+
+		// Heights should match since fully-rounded square = cylinder
+		expect(square.height).toBeCloseTo(round.height, 1);
+	});
+
+	it('steeper angle produces taller template', () => {
+		const shallow = generateSquareMiter({ ...baseSquare, angle: 80 });
+		const steep = generateSquareMiter({ ...baseSquare, angle: 45 });
+		expect(steep.height).toBeGreaterThan(shallow.height);
+	});
+
+	it('custom resolution works', () => {
+		const result = generateSquareMiter({ ...baseSquare, resolution: 360 });
+		expect(result.points.length).toBe(360);
+	});
+
+	it('offset shifts the template', () => {
+		const centered = generateSquareMiter(baseSquare);
+		const offset = generateSquareMiter({ ...baseSquare, offset: 5 });
+		expect(offset.height).not.toBeCloseTo(centered.height, 1);
+	});
+
+	it('all square presets generate valid templates', () => {
+		for (const preset of SQUARE_PRESETS) {
+			const result = generateSquareMiter({
+				cutDiameter: preset.cutDiameter,
+				parentSide: preset.parentSide,
+				wallThickness: preset.wallThickness,
+				cornerRadius: preset.cornerRadius,
+				angle: preset.angle,
+				offset: preset.offset,
+				twist: preset.twist
+			});
+			expect(result.points.length).toBe(1440);
+			expect(result.height).toBeGreaterThan(0);
+			expect(result.circumference).toBeGreaterThan(0);
+		}
+	});
+});
+
+// ============================================================
+// Tube Slot Template
+// ============================================================
+
+describe('generateSlotTemplate', () => {
+	const baseSlot: SlotParams = {
+		tubeDiameter: 22.2,
+		wallThickness: 0.8,
+		plateThickness: 3.0,
+		slotDepth: 15
+	};
+
+	it('generates correct number of points', () => {
+		const result = generateSlotTemplate(baseSlot);
+		expect(result.points.length).toBe(1440);
+	});
+
+	it('height equals slot depth', () => {
+		const result = generateSlotTemplate(baseSlot);
+		expect(result.height).toBeCloseTo(15, 4);
+	});
+
+	it('circumference matches tube OD', () => {
+		const result = generateSlotTemplate(baseSlot);
+		expect(result.circumference).toBeCloseTo(Math.PI * 22.2, 1);
+	});
+
+	it('most points are at y=0 (outside slot)', () => {
+		const result = generateSlotTemplate(baseSlot);
+		const zeroPoints = result.points.filter((p) => p.y < 0.01);
+		// Slot is a small angular region; most points should be at baseline
+		expect(zeroPoints.length).toBeGreaterThan(result.points.length * 0.8);
+	});
+
+	it('some points are at slot depth (inside slot)', () => {
+		const result = generateSlotTemplate(baseSlot);
+		const slotPoints = result.points.filter((p) => p.y > 14.9);
+		expect(slotPoints.length).toBeGreaterThan(0);
+	});
+
+	it('slot width scales with plate thickness', () => {
+		const thin = generateSlotTemplate({ ...baseSlot, plateThickness: 2.0 });
+		const thick = generateSlotTemplate({ ...baseSlot, plateThickness: 5.0 });
+
+		const thinSlotCount = thin.points.filter((p) => p.y > 14.9).length;
+		const thickSlotCount = thick.points.filter((p) => p.y > 14.9).length;
+		expect(thickSlotCount).toBeGreaterThan(thinSlotCount);
+	});
+
+	it('throws if plate thickness exceeds tube inner diameter', () => {
+		expect(() =>
+			generateSlotTemplate({
+				...baseSlot,
+				plateThickness: 25 // larger than inner diameter
+			})
+		).toThrow('Plate thickness must be less than tube inner diameter');
+	});
+
+	it('custom resolution works', () => {
+		const result = generateSlotTemplate({ ...baseSlot, resolution: 360 });
+		expect(result.points.length).toBe(360);
+	});
+
+	it('different slot depths produce different heights', () => {
+		const shallow = generateSlotTemplate({ ...baseSlot, slotDepth: 10 });
+		const deep = generateSlotTemplate({ ...baseSlot, slotDepth: 20 });
+		expect(deep.height).toBeCloseTo(20, 4);
+		expect(shallow.height).toBeCloseTo(10, 4);
+	});
+
+	it('all slot presets generate valid templates', () => {
+		for (const preset of SLOT_PRESETS) {
+			const result = generateSlotTemplate({
+				tubeDiameter: preset.tubeDiameter,
+				wallThickness: preset.wallThickness,
+				plateThickness: preset.plateThickness,
+				slotDepth: preset.slotDepth
 			});
 			expect(result.points.length).toBe(1440);
 			expect(result.height).toBeGreaterThan(0);

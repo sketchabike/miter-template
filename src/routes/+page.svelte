@@ -4,6 +4,8 @@
 		generateBridgeMiter,
 		generateCompoundMiter,
 		generateCollectorMiter,
+		generateSquareMiter,
+		generateSlotTemplate,
 		computeCompoundAngle,
 		PRESETS,
 		type CopeParams,
@@ -12,6 +14,8 @@
 		type BridgeResult,
 		type CompoundAngleParams,
 		type CollectorParams,
+		type SquareParams,
+		type SlotParams,
 		type JointType
 	} from '$lib/math/cope.js';
 	import { generatePDF, PAPER_SIZES, type PaperSize } from '$lib/math/pdf.js';
@@ -61,11 +65,30 @@
 		]
 	});
 
+	// --- Square params ---
+	let squareParams = $state<SquareParams>({
+		cutDiameter: 25.4,
+		parentSide: 38,
+		wallThickness: 0.9,
+		cornerRadius: 4,
+		angle: 90
+	});
+
+	// --- Slot params ---
+	let slotParams = $state<SlotParams>({
+		tubeDiameter: 22.2,
+		wallThickness: 0.8,
+		plateThickness: 3.0,
+		slotDepth: 15
+	});
+
 	// --- Computed results ---
 	let standardResult = $derived<CopeResult>(generateCope(params));
 	let bridgeResult = $derived<BridgeResult>(generateBridgeMiter(bridgeParams));
 	let compoundResult = $derived<CopeResult>(generateCompoundMiter(compoundParams));
 	let collectorResult = $derived<CopeResult>(generateCollectorMiter(collectorParams));
+	let squareResult = $derived<CopeResult>(generateSquareMiter(squareParams));
+	let slotResult = $derived<CopeResult>(generateSlotTemplate(slotParams));
 
 	// Active result for display (single-curve types)
 	let activeResult = $derived<CopeResult>(
@@ -75,7 +98,11 @@
 				? compoundResult
 				: jointType === 'collector'
 					? collectorResult
-					: standardResult
+					: jointType === 'square'
+						? squareResult
+						: jointType === 'slot'
+							? slotResult
+							: standardResult
 	);
 
 	// For compound angle: computed true angle and twist for info display
@@ -97,6 +124,14 @@
 
 	function handleCollectorParamsChange(newParams: CollectorParams) {
 		collectorParams = newParams;
+	}
+
+	function handleSquareParamsChange(newParams: SquareParams) {
+		squareParams = newParams;
+	}
+
+	function handleSlotParamsChange(newParams: SlotParams) {
+		slotParams = newParams;
 	}
 
 	function handlePrintPDF() {
@@ -156,7 +191,7 @@
 	<title>Tube Miter Template Generator — Free tool for framebuilders</title>
 	<meta
 		name="description"
-		content="Free tube miter template generator. Create printable cope templates for bicycle frame tube joints. Supports round, elliptical, tapered, flat plate, bridge, and compound angle joints."
+		content="Free tube miter template generator. Create printable cope templates for bicycle frame tube joints. Supports round, elliptical, tapered, flat plate, bridge, compound angle, collector, round-to-square, and tube slot joints."
 	/>
 </svelte:head>
 
@@ -184,6 +219,10 @@
 				oncompoundchange={handleCompoundParamsChange}
 				{collectorParams}
 				oncollectorchange={handleCollectorParamsChange}
+				{squareParams}
+				onsquarechange={handleSquareParamsChange}
+				{slotParams}
+				onslotchange={handleSlotParamsChange}
 				{units}
 				onunitschange={(u) => (units = u)}
 			/>
@@ -246,6 +285,36 @@
 						<span class="info-label">Parent Tubes</span>
 						<span class="info-value">{collectorParams.parents.length}</span>
 					</div>
+				{:else if jointType === 'square'}
+					<div class="info-item">
+						<span class="info-label">Circumference</span>
+						<span class="info-value">{fmtDim(squareResult.circumference)}</span>
+					</div>
+					<div class="info-item">
+						<span class="info-label">Template Height</span>
+						<span class="info-value">{fmtDim(squareResult.height)}</span>
+					</div>
+					<div class="info-item">
+						<span class="info-label">Corner Radius</span>
+						<span class="info-value">{fmtDim(squareParams.cornerRadius)}</span>
+					</div>
+					<div class="info-item">
+						<span class="info-label">Angle</span>
+						<span class="info-value">{squareParams.angle.toFixed(1)}°</span>
+					</div>
+				{:else if jointType === 'slot'}
+					<div class="info-item">
+						<span class="info-label">Circumference</span>
+						<span class="info-value">{fmtDim(slotResult.circumference)}</span>
+					</div>
+					<div class="info-item">
+						<span class="info-label">Slot Depth</span>
+						<span class="info-value">{fmtDim(slotParams.slotDepth)}</span>
+					</div>
+					<div class="info-item">
+						<span class="info-label">Plate Thickness</span>
+						<span class="info-value">{fmtDim(slotParams.plateThickness)}</span>
+					</div>
 				{:else}
 					<div class="info-item">
 						<span class="info-label">Circumference</span>
@@ -305,6 +374,16 @@
 						<li>Enter the cut tube diameter, wall thickness, and angle to the flat surface</li>
 						<li>No parent tube diameter needed — the flat surface has infinite radius</li>
 						<li>Useful for gussets, mounting tabs, and flat plate connections</li>
+					{:else if jointType === 'square'}
+						<li>Enter the round cut tube dimensions and the square parent section side length</li>
+						<li>Set the <strong>corner radius</strong> — 0 for sharp corners, max (half the side) for fully round</li>
+						<li>The template adapts: flat sections where the tube meets the flat face, curved at corners</li>
+						<li>Useful for joining round tubes to square/rectangular tubing</li>
+					{:else if jointType === 'slot'}
+						<li>Enter the tube dimensions and the <strong>plate thickness</strong> of the dropout or insert</li>
+						<li>Set the <strong>slot depth</strong> — how far into the tube end to cut</li>
+						<li>The template shows a rectangular slot cutout that wraps around the tube</li>
+						<li>Wrap the template, trace the slot outline, then cut with a saw and file to fit</li>
 					{:else}
 						<li>Select a joint preset or enter custom dimensions</li>
 					{/if}
