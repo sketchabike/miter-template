@@ -17,6 +17,37 @@
 
 const TWO_PI = 2 * Math.PI;
 
+/**
+ * Validate common tube parameters. Throws on invalid input.
+ */
+function validateTube(cutDiameter: number | [number, number], wallThickness: number, label = 'Cut tube'): void {
+	const major = Array.isArray(cutDiameter) ? cutDiameter[0] : cutDiameter;
+	const minor = Array.isArray(cutDiameter) ? cutDiameter[1] : cutDiameter;
+
+	if (major <= 0 || minor <= 0) {
+		throw new Error(`${label} diameter must be positive`);
+	}
+	if (wallThickness <= 0) {
+		throw new Error('Wall thickness must be positive');
+	}
+	const smallerDia = Math.min(major, minor);
+	if (wallThickness >= smallerDia / 2) {
+		throw new Error('Wall thickness must be less than tube radius');
+	}
+}
+
+function validateAngle(angle: number): void {
+	if (angle <= 0 || angle >= 180) {
+		throw new Error('Angle must be between 0° and 180° (exclusive)');
+	}
+}
+
+function validatePositive(value: number, name: string): void {
+	if (value <= 0) {
+		throw new Error(`${name} must be positive`);
+	}
+}
+
 /** Parameters for generating a cope/miter template */
 export interface CopeParams {
 	/** Cut tube outer diameter in mm (or [major, minor] for elliptical) */
@@ -150,6 +181,10 @@ export function generateCope(params: CopeParams): CopeResult {
 		flat = false,
 		resolution = 1440
 	} = params;
+
+	validateTube(cutDiameter, wallThickness);
+	if (!flat) validatePositive(parentDiameter, 'Parent diameter');
+	validateAngle(angle);
 
 	// Parse cut tube dimensions
 	let cutMajor: number;
@@ -442,6 +477,13 @@ export function generateBridgeMiter(params: BridgeParams): BridgeResult {
 		resolution = 1440
 	} = params;
 
+	validateTube(tubeDiameter, wallThickness, 'Bridge tube');
+	validatePositive(parentDiameterA, 'Parent diameter A');
+	validatePositive(parentDiameterB, 'Parent diameter B');
+	validateAngle(angleA);
+	validateAngle(angleB);
+	validatePositive(bridgeLength, 'Bridge length');
+
 	const endA = generateCope({
 		cutDiameter: tubeDiameter,
 		parentDiameter: parentDiameterA,
@@ -523,6 +565,10 @@ export function generateCompoundMiter(params: CompoundAngleParams): CopeResult {
 		resolution = 1440
 	} = params;
 
+	validateTube(stayDiameter, wallThickness, 'Stay');
+	validatePositive(seatTubeDiameter, 'Seat tube diameter');
+	validateAngle(elevation);
+
 	const { trueAngle, twist } = computeCompoundAngle(elevation, splay);
 	const lateralOffset = staySpacing / 2;
 
@@ -576,6 +622,12 @@ export function generateCollectorMiter(params: CollectorParams): CopeResult {
 
 	if (parents.length === 0) {
 		throw new Error('Collector requires at least one parent tube');
+	}
+
+	validateTube(cutDiameter, wallThickness);
+	for (const parent of parents) {
+		validatePositive(parent.parentDiameter, 'Parent diameter');
+		validateAngle(parent.angle);
 	}
 
 	// Generate individual cope for each parent
@@ -712,6 +764,13 @@ export function generateSquareMiter(params: SquareParams): CopeResult {
 		resolution = 1440
 	} = params;
 
+	validateTube(cutDiameter, wallThickness);
+	validatePositive(parentSide, 'Parent side length');
+	validateAngle(angle);
+	if (cornerRadius < 0) {
+		throw new Error('Corner radius must be non-negative');
+	}
+
 	const parentRadius = parentSide / 2;
 	const rNorm = Math.min(cornerRadius / parentRadius, 1.0);
 
@@ -819,6 +878,10 @@ export function generateSlotTemplate(params: SlotParams): CopeResult {
 		slotDepth,
 		resolution = 1440
 	} = params;
+
+	validateTube(tubeDiameter, wallThickness, 'Tube');
+	validatePositive(plateThickness, 'Plate thickness');
+	validatePositive(slotDepth, 'Slot depth');
 
 	const innerRadius = (tubeDiameter - wallThickness * 2) / 2;
 	const circumference = Math.PI * tubeDiameter;

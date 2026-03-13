@@ -1055,3 +1055,278 @@ describe('generateSlotTemplate', () => {
 		}
 	});
 });
+
+// ============================================================
+// Input Validation — degenerate / error inputs
+// ============================================================
+
+describe('input validation', () => {
+	const validParams: CopeParams = {
+		cutDiameter: 25.4,
+		parentDiameter: 31.8,
+		wallThickness: 0.9,
+		angle: 90
+	};
+
+	describe('generateCope', () => {
+		it('throws on zero cut diameter', () => {
+			expect(() => generateCope({ ...validParams, cutDiameter: 0 })).toThrow(
+				'diameter must be positive'
+			);
+		});
+
+		it('throws on negative cut diameter', () => {
+			expect(() => generateCope({ ...validParams, cutDiameter: -5 })).toThrow(
+				'diameter must be positive'
+			);
+		});
+
+		it('throws on zero parent diameter', () => {
+			expect(() => generateCope({ ...validParams, parentDiameter: 0 })).toThrow(
+				'must be positive'
+			);
+		});
+
+		it('throws on zero wall thickness', () => {
+			expect(() => generateCope({ ...validParams, wallThickness: 0 })).toThrow(
+				'Wall thickness must be positive'
+			);
+		});
+
+		it('throws when wall thickness >= tube radius', () => {
+			expect(() =>
+				generateCope({ ...validParams, wallThickness: 13 })
+			).toThrow('Wall thickness must be less than tube radius');
+		});
+
+		it('throws on angle = 0', () => {
+			expect(() => generateCope({ ...validParams, angle: 0 })).toThrow(
+				'Angle must be between'
+			);
+		});
+
+		it('throws on angle = 180', () => {
+			expect(() => generateCope({ ...validParams, angle: 180 })).toThrow(
+				'Angle must be between'
+			);
+		});
+
+		it('throws on negative angle', () => {
+			expect(() => generateCope({ ...validParams, angle: -10 })).toThrow(
+				'Angle must be between'
+			);
+		});
+
+		it('throws on zero elliptical minor diameter', () => {
+			expect(() =>
+				generateCope({ ...validParams, cutDiameter: [25.4, 0] })
+			).toThrow('diameter must be positive');
+		});
+
+		it('throws when wall exceeds elliptical minor radius', () => {
+			expect(() =>
+				generateCope({ ...validParams, cutDiameter: [25.4, 2.0], wallThickness: 1.5 })
+			).toThrow('Wall thickness must be less than tube radius');
+		});
+	});
+
+	describe('generateBridgeMiter', () => {
+		it('throws on zero tube diameter', () => {
+			expect(() =>
+				generateBridgeMiter({
+					tubeDiameter: 0,
+					wallThickness: 0.8,
+					parentDiameterA: 14,
+					parentDiameterB: 14,
+					angleA: 90,
+					angleB: 90,
+					bridgeLength: 100
+				})
+			).toThrow('diameter must be positive');
+		});
+
+		it('throws on zero bridge length', () => {
+			expect(() =>
+				generateBridgeMiter({
+					tubeDiameter: 12.7,
+					wallThickness: 0.8,
+					parentDiameterA: 14,
+					parentDiameterB: 14,
+					angleA: 90,
+					angleB: 90,
+					bridgeLength: 0
+				})
+			).toThrow('Bridge length must be positive');
+		});
+
+		it('throws on invalid angle A', () => {
+			expect(() =>
+				generateBridgeMiter({
+					tubeDiameter: 12.7,
+					wallThickness: 0.8,
+					parentDiameterA: 14,
+					parentDiameterB: 14,
+					angleA: 0,
+					angleB: 90,
+					bridgeLength: 100
+				})
+			).toThrow('Angle must be between');
+		});
+	});
+
+	describe('generateCompoundMiter', () => {
+		it('throws on zero stay diameter', () => {
+			expect(() =>
+				generateCompoundMiter({
+					stayDiameter: 0,
+					seatTubeDiameter: 28.6,
+					wallThickness: 0.8,
+					elevation: 65,
+					splay: 5,
+					staySpacing: 42
+				})
+			).toThrow('diameter must be positive');
+		});
+
+		it('throws on invalid elevation', () => {
+			expect(() =>
+				generateCompoundMiter({
+					stayDiameter: 14,
+					seatTubeDiameter: 28.6,
+					wallThickness: 0.8,
+					elevation: 0,
+					splay: 5,
+					staySpacing: 42
+				})
+			).toThrow('Angle must be between');
+		});
+	});
+
+	describe('generateCollectorMiter', () => {
+		it('throws on zero cut diameter', () => {
+			expect(() =>
+				generateCollectorMiter({
+					cutDiameter: 0,
+					wallThickness: 0.9,
+					parents: [{ parentDiameter: 25.4, angle: 60, clockPosition: 0 }]
+				})
+			).toThrow('diameter must be positive');
+		});
+
+		it('throws on invalid parent angle', () => {
+			expect(() =>
+				generateCollectorMiter({
+					cutDiameter: 28.6,
+					wallThickness: 0.9,
+					parents: [{ parentDiameter: 25.4, angle: 180, clockPosition: 0 }]
+				})
+			).toThrow('Angle must be between');
+		});
+
+		it('throws on zero parent diameter', () => {
+			expect(() =>
+				generateCollectorMiter({
+					cutDiameter: 28.6,
+					wallThickness: 0.9,
+					parents: [{ parentDiameter: 0, angle: 60, clockPosition: 0 }]
+				})
+			).toThrow('must be positive');
+		});
+	});
+
+	describe('generateSquareMiter', () => {
+		it('throws on zero cut diameter', () => {
+			expect(() =>
+				generateSquareMiter({
+					cutDiameter: 0,
+					parentSide: 38,
+					wallThickness: 0.9,
+					cornerRadius: 4,
+					angle: 90
+				})
+			).toThrow('diameter must be positive');
+		});
+
+		it('throws on zero parent side', () => {
+			expect(() =>
+				generateSquareMiter({
+					cutDiameter: 25.4,
+					parentSide: 0,
+					wallThickness: 0.9,
+					cornerRadius: 4,
+					angle: 90
+				})
+			).toThrow('Parent side length must be positive');
+		});
+
+		it('throws on negative corner radius', () => {
+			expect(() =>
+				generateSquareMiter({
+					cutDiameter: 25.4,
+					parentSide: 38,
+					wallThickness: 0.9,
+					cornerRadius: -1,
+					angle: 90
+				})
+			).toThrow('Corner radius must be non-negative');
+		});
+
+		it('throws on invalid angle', () => {
+			expect(() =>
+				generateSquareMiter({
+					cutDiameter: 25.4,
+					parentSide: 38,
+					wallThickness: 0.9,
+					cornerRadius: 4,
+					angle: 180
+				})
+			).toThrow('Angle must be between');
+		});
+	});
+
+	describe('generateSlotTemplate', () => {
+		it('throws on zero tube diameter', () => {
+			expect(() =>
+				generateSlotTemplate({
+					tubeDiameter: 0,
+					wallThickness: 0.8,
+					plateThickness: 3,
+					slotDepth: 15
+				})
+			).toThrow('diameter must be positive');
+		});
+
+		it('throws on zero plate thickness', () => {
+			expect(() =>
+				generateSlotTemplate({
+					tubeDiameter: 22.2,
+					wallThickness: 0.8,
+					plateThickness: 0,
+					slotDepth: 15
+				})
+			).toThrow('Plate thickness must be positive');
+		});
+
+		it('throws on zero slot depth', () => {
+			expect(() =>
+				generateSlotTemplate({
+					tubeDiameter: 22.2,
+					wallThickness: 0.8,
+					plateThickness: 3,
+					slotDepth: 0
+				})
+			).toThrow('Slot depth must be positive');
+		});
+
+		it('throws when wall thickness equals tube radius', () => {
+			expect(() =>
+				generateSlotTemplate({
+					tubeDiameter: 4,
+					wallThickness: 2,
+					plateThickness: 1,
+					slotDepth: 10
+				})
+			).toThrow('Wall thickness must be less than tube radius');
+		});
+	});
+});

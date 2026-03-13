@@ -147,7 +147,7 @@
 	class="template-svg"
 	viewBox="0 0 {viewWidth} {viewHeight}"
 	xmlns="http://www.w3.org/2000/svg"
-	style="width: {viewWidth}mm; height: {viewHeight}mm;"
+	style="width: {viewWidth}mm;"
 >
 	<!-- Background -->
 	<rect x="0" y="0" width={viewWidth} height={viewHeight} fill="var(--bg-template, #1a1a2e)" />
@@ -306,7 +306,7 @@
 	.template-svg {
 		display: block;
 		max-width: 100%;
-		height: auto;
+		max-height: 70vh;
 		border-radius: 4px;
 	}
 

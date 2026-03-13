@@ -64,7 +64,8 @@
 	// --- Standard / flat plate state ---
 	let selectedPreset = $state('Custom');
 	let isElliptical = $state(Array.isArray(initialParams.cutDiameter));
-	let showAdvanced = $state(false);
+	let showAdvancedStandard = $state(false);
+	let showAdvancedSquare = $state(false);
 
 	let cutMajor = $state(
 		Array.isArray(initialParams.cutDiameter)
@@ -497,11 +498,11 @@
 		{#if jointType === 'standard'}
 			<div class="separator"></div>
 
-			<button class="advanced-toggle" onclick={() => (showAdvanced = !showAdvanced)}>
-				{showAdvanced ? '▾' : '▸'} Advanced Options
+			<button class="advanced-toggle" onclick={() => (showAdvancedStandard = !showAdvancedStandard)}>
+				{showAdvancedStandard ? '▾' : '▸'} Advanced Options
 			</button>
 
-			{#if showAdvanced}
+			{#if showAdvancedStandard}
 				<div class="advanced-panel">
 					<div class="control-group">
 						<label>
@@ -1038,11 +1039,11 @@
 
 		<div class="separator"></div>
 
-		<button class="advanced-toggle" onclick={() => (showAdvanced = !showAdvanced)}>
-			{showAdvanced ? '▾' : '▸'} Advanced Options
+		<button class="advanced-toggle" onclick={() => (showAdvancedSquare = !showAdvancedSquare)}>
+			{showAdvancedSquare ? '▾' : '▸'} Advanced Options
 		</button>
 
-		{#if showAdvanced}
+		{#if showAdvancedSquare}
 			<div class="advanced-panel">
 				<div class="control-group">
 					<label>
