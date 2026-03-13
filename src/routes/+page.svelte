@@ -199,7 +199,6 @@
 	<header>
 		<div class="header-content">
 			<h1>Tube Miter Templates</h1>
-			<p class="subtitle">Free cope template generator for framebuilders</p>
 		</div>
 		<div class="header-brand">
 			by <a href="https://sketchabike.com" target="_blank" rel="noopener">SketchABike</a>
@@ -469,11 +468,6 @@
 		font-size: 1.4rem;
 		font-weight: 700;
 		color: var(--color-text);
-	}
-
-	.subtitle {
-		font-size: 0.85rem;
-		color: var(--color-text-secondary);
 	}
 
 	.header-brand {
