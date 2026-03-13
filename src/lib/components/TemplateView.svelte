@@ -1,37 +1,64 @@
 <script lang="ts">
-	import type { CopeResult } from '$lib/math/cope.js';
+	import type { CopeResult, BridgeResult } from '$lib/math/cope.js';
 
 	interface Props {
 		result: CopeResult;
+		/** For bridge templates: the complete bridge result */
+		bridge?: BridgeResult;
 		showGuidelines?: boolean;
 		showLegend?: boolean;
 	}
 
-	let { result, showGuidelines = true, showLegend = true }: Props = $props();
+	let { result, bridge, showGuidelines = true, showLegend = true }: Props = $props();
 
 	// Padding around the template in mm
 	const PADDING = 8;
-	// Headroom above the curve (extra paper for wrapping)
+	// Headroom above the curve (extra paper for wrapping) — standard mode only
 	const HEADROOM = 20;
+	// Small padding above/below bridge cope curves
+	const BRIDGE_PAD = 4;
 
-	let totalHeight = $derived(result.height + HEADROOM);
-	let viewWidth = $derived(result.circumference + PADDING * 2);
+	let isBridge = $derived(!!bridge);
+
+	let totalHeight = $derived(
+		isBridge
+			? bridge!.bridgeLength + BRIDGE_PAD * 2
+			: result.height + HEADROOM
+	);
+	let viewWidth = $derived(
+		(isBridge ? bridge!.circumference : result.circumference) + PADDING * 2
+	);
 	let viewHeight = $derived(totalHeight + PADDING * 2);
 
-	// Build the SVG path from the cope points
-	let pathData = $derived.by(() => {
-		if (result.points.length === 0) return '';
+	let circumference = $derived(isBridge ? bridge!.circumference : result.circumference);
 
+	// Build the SVG path from the cope points (standard / flat / compound)
+	let pathData = $derived.by(() => {
+		if (isBridge) return ''; // handled separately
+		if (result.points.length === 0) return '';
+		return buildPathData(result.points, result.circumference, totalHeight);
+	});
+
+	// Build SVG paths for bridge template (two curves)
+	let bridgePathA = $derived.by(() => {
+		if (!isBridge) return '';
+		return buildBridgePath(bridge!.endA.points, bridge!.circumference, totalHeight, 'bottom');
+	});
+
+	let bridgePathB = $derived.by(() => {
+		if (!isBridge) return '';
+		return buildBridgePath(bridge!.endB.points, bridge!.circumference, totalHeight, 'top');
+	});
+
+	function buildPathData(points: CopeResult['points'], circ: number, tHeight: number): string {
 		const parts: string[] = [];
 		let prevX = -1;
 
-		for (let i = 0; i < result.points.length; i++) {
-			const p = result.points[i];
+		for (let i = 0; i < points.length; i++) {
+			const p = points[i];
 			const x = p.x + PADDING;
-			// Flip Y and add headroom so curve sits at bottom of template
-			const y = PADDING + totalHeight - p.y;
+			const y = PADDING + tHeight - p.y;
 
-			// Detect wrapping (x goes from ~circumference back to ~0)
 			if (i === 0 || x < prevX - 1) {
 				parts.push(`M ${x.toFixed(3)} ${y.toFixed(3)}`);
 			} else {
@@ -41,18 +68,62 @@
 		}
 
 		// Close back to the first point
-		const first = result.points[0];
-		const fx = first.x + PADDING + result.circumference;
-		const fy = PADDING + totalHeight - first.y;
+		const first = points[0];
+		const fx = first.x + PADDING + circ;
+		const fy = PADDING + tHeight - first.y;
 		parts.push(`L ${fx.toFixed(3)} ${fy.toFixed(3)}`);
 
 		return parts.join(' ');
-	});
+	}
+
+	function buildBridgePath(
+		points: CopeResult['points'],
+		circ: number,
+		tHeight: number,
+		end: 'bottom' | 'top'
+	): string {
+		const parts: string[] = [];
+		let prevX = -1;
+
+		for (let i = 0; i < points.length; i++) {
+			const p = points[i];
+			const x = p.x + PADDING;
+			let y: number;
+
+			if (end === 'bottom') {
+				// Curve at bottom: y=0 is the bottom edge, cope goes upward
+				y = PADDING + tHeight - p.y;
+			} else {
+				// Curve at top: y=0 of the cope maps to the top edge, cope goes downward
+				y = PADDING + p.y;
+			}
+
+			if (i === 0 || x < prevX - 1) {
+				parts.push(`M ${x.toFixed(3)} ${y.toFixed(3)}`);
+			} else {
+				parts.push(`L ${x.toFixed(3)} ${y.toFixed(3)}`);
+			}
+			prevX = x;
+		}
+
+		// Close back to the first point
+		const first = points[0];
+		const fx = first.x + PADDING + circ;
+		let fy: number;
+		if (end === 'bottom') {
+			fy = PADDING + tHeight - first.y;
+		} else {
+			fy = PADDING + first.y;
+		}
+		parts.push(`L ${fx.toFixed(3)} ${fy.toFixed(3)}`);
+
+		return parts.join(' ');
+	}
 
 	// Quarter guidelines (0°, 90°, 180°, 270°, 360°)
 	let guidelines = $derived.by(() => {
 		const lines: { x: number; label: string }[] = [];
-		const step = result.circumference / 4;
+		const step = circumference / 4;
 		for (let i = 0; i <= 4; i++) {
 			lines.push({
 				x: PADDING + i * step,
@@ -65,7 +136,7 @@
 	// Scale marks for print verification (10mm intervals)
 	let scaleMarks = $derived.by(() => {
 		const marks: number[] = [];
-		for (let d = 10; d < result.circumference; d += 10) {
+		for (let d = 10; d < circumference; d += 10) {
 			marks.push(PADDING + d);
 		}
 		return marks;
@@ -132,17 +203,51 @@
 		{/each}
 	{/if}
 
-	<!-- The cope curve -->
-	<path
-		d={pathData}
-		fill="none"
-		stroke="var(--color-curve, #00d4ff)"
-		stroke-width="0.4"
-		stroke-linejoin="round"
-	/>
+	<!-- The cope curve(s) -->
+	{#if isBridge}
+		<!-- Bridge: two curves -->
+		<path
+			d={bridgePathA}
+			fill="none"
+			stroke="var(--color-curve, #00d4ff)"
+			stroke-width="0.4"
+			stroke-linejoin="round"
+		/>
+		<path
+			d={bridgePathB}
+			fill="none"
+			stroke="#ff6b6b"
+			stroke-width="0.4"
+			stroke-linejoin="round"
+		/>
+		<!-- End labels -->
+		<text
+			x={PADDING + 2}
+			y={PADDING + totalHeight - 2}
+			fill="var(--color-curve, #00d4ff)"
+			font-size="2.5"
+			font-family="monospace"
+		>End A</text>
+		<text
+			x={PADDING + 2}
+			y={PADDING + 4}
+			fill="#ff6b6b"
+			font-size="2.5"
+			font-family="monospace"
+		>End B</text>
+	{:else}
+		<!-- Standard single curve -->
+		<path
+			d={pathData}
+			fill="none"
+			stroke="var(--color-curve, #00d4ff)"
+			stroke-width="0.4"
+			stroke-linejoin="round"
+		/>
+	{/if}
 
 	<!-- Legend -->
-	{#if showLegend}
+	{#if showLegend && !isBridge}
 		{@const params = result.params}
 		{@const isEllip = Array.isArray(params.cutDiameter)}
 		<text
@@ -163,14 +268,36 @@
 				| Angle: {params.angle.toFixed(1)}°
 			</tspan>
 			{#if params.offset}
-				<tspan x={PADDING + 2} dy="3.5">Offset: {params.offset}mm</tspan>
+				<tspan x={PADDING + 2} dy="3.5">Offset: {params.offset.toFixed(1)}mm</tspan>
 			{/if}
 			{#if params.taper}
 				<tspan x={PADDING + 2} dy="3.5">Taper: {params.taper}</tspan>
 			{/if}
 			{#if params.twist}
-				<tspan x={PADDING + 2} dy="3.5">Twist: {params.twist}°</tspan>
+				<tspan x={PADDING + 2} dy="3.5">Twist: {params.twist.toFixed(1)}°</tspan>
 			{/if}
+		</text>
+	{/if}
+
+	{#if showLegend && isBridge}
+		<text
+			x={PADDING + circumference - 2}
+			y={PADDING + 4}
+			fill="var(--color-text-dim, #888)"
+			font-size="2.8"
+			font-family="monospace"
+			text-anchor="end"
+		>
+			<tspan x={PADDING + circumference - 2} dy="0">
+				Bridge: {bridge!.endA.params.cutDiameter}mm | Wall: {bridge!.endA.params.wallThickness}mm
+			</tspan>
+			<tspan x={PADDING + circumference - 2} dy="3.5">
+				A: {bridge!.endA.params.parentDiameter}mm @ {bridge!.endA.params.angle.toFixed(1)}°
+				| B: {bridge!.endB.params.parentDiameter}mm @ {bridge!.endB.params.angle.toFixed(1)}°
+			</tspan>
+			<tspan x={PADDING + circumference - 2} dy="3.5">
+				Length: {bridge!.bridgeLength}mm
+			</tspan>
 		</text>
 	{/if}
 </svg>

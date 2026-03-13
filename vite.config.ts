@@ -3,6 +3,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
 	plugins: [sveltekit()],
+	server: {
+		allowedHosts: ['bowman']
+	},
 	test: {
 		include: ['src/**/*.test.ts']
 	}

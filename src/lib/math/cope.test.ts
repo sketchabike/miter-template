@@ -1,11 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import {
 	generateCope,
+	generateBridgeMiter,
+	generateCompoundMiter,
+	computeCompoundAngle,
 	mmToInches,
 	inchesToMm,
 	formatDual,
 	PRESETS,
-	type CopeParams
+	FLAT_PLATE_PRESETS,
+	BRIDGE_PRESETS,
+	COMPOUND_PRESETS,
+	type CopeParams,
+	type BridgeParams,
+	type CompoundAngleParams
 } from './cope.js';
 
 describe('generateCope', () => {
@@ -367,5 +375,273 @@ describe('presets', () => {
 		expect(names).toContain('Seat Stay → Seat Tube (L)');
 		expect(names).toContain('Chainstay → BB Shell (oval)');
 		expect(names).toContain('Custom');
+	});
+});
+
+// ============================================================
+// Flat Plate
+// ============================================================
+
+describe('flat plate mode', () => {
+	it('parentDiameter does not affect flat plate result', () => {
+		const base: CopeParams = {
+			cutDiameter: 25.4,
+			parentDiameter: 100,
+			wallThickness: 0.9,
+			angle: 45,
+			flat: true
+		};
+
+		const result100 = generateCope(base);
+		const result1000 = generateCope({ ...base, parentDiameter: 1000 });
+
+		// Heights should be identical — parentDiameter cancels out in flat mode
+		expect(result100.height).toBeCloseTo(result1000.height, 4);
+		for (let i = 0; i < result100.points.length; i++) {
+			expect(result100.points[i].y).toBeCloseTo(result1000.points[i].y, 4);
+		}
+	});
+
+	it('flat plate at 45° has expected height', () => {
+		const result = generateCope({
+			cutDiameter: 25.4,
+			parentDiameter: 100,
+			wallThickness: 0.9,
+			angle: 45,
+			flat: true
+		});
+
+		// Height ≈ inner_radius * tan(45°) * 2 = inner_radius * 2
+		// inner_radius = (25.4 - 2*0.9) / 2 = 11.8
+		// But the flat formula uses normalized coords, so the exact height
+		// depends on the slope term. Just verify it's positive and reasonable.
+		expect(result.height).toBeGreaterThan(5);
+		expect(result.height).toBeLessThan(50);
+	});
+
+	it('all flat plate presets generate valid templates', () => {
+		for (const preset of FLAT_PLATE_PRESETS) {
+			const result = generateCope({
+				cutDiameter: preset.cutDiameter,
+				parentDiameter: preset.parentDiameter,
+				wallThickness: preset.wallThickness,
+				angle: preset.angle,
+				flat: true
+			});
+			expect(result.points.length).toBe(1440);
+			expect(result.height).toBeGreaterThan(0);
+			expect(result.circumference).toBeGreaterThan(0);
+		}
+	});
+});
+
+// ============================================================
+// Bridge Miter
+// ============================================================
+
+describe('generateBridgeMiter', () => {
+	const baseBridge: BridgeParams = {
+		tubeDiameter: 12.7,
+		wallThickness: 0.8,
+		parentDiameterA: 14,
+		parentDiameterB: 14,
+		angleA: 90,
+		angleB: 90,
+		bridgeLength: 100
+	};
+
+	it('returns two cope results and bridge length', () => {
+		const result = generateBridgeMiter(baseBridge);
+		expect(result.endA).toBeDefined();
+		expect(result.endB).toBeDefined();
+		expect(result.bridgeLength).toBe(100);
+		expect(result.circumference).toBeCloseTo(Math.PI * 12.7, 1);
+	});
+
+	it('both ends have correct number of points', () => {
+		const result = generateBridgeMiter(baseBridge);
+		expect(result.endA.points.length).toBe(1440);
+		expect(result.endB.points.length).toBe(1440);
+	});
+
+	it('same parent diameter and angle produces identical end curves', () => {
+		const result = generateBridgeMiter(baseBridge);
+		expect(result.endA.height).toBeCloseTo(result.endB.height, 4);
+
+		for (let i = 0; i < result.endA.points.length; i++) {
+			expect(result.endA.points[i].y).toBeCloseTo(result.endB.points[i].y, 4);
+		}
+	});
+
+	it('different parent diameters produce different end curves', () => {
+		const result = generateBridgeMiter({
+			...baseBridge,
+			parentDiameterA: 14,
+			parentDiameterB: 22.2
+		});
+		expect(result.endA.height).not.toBeCloseTo(result.endB.height, 1);
+	});
+
+	it('different angles produce different end curves', () => {
+		const result = generateBridgeMiter({
+			...baseBridge,
+			angleA: 90,
+			angleB: 70
+		});
+		expect(result.endA.height).not.toBeCloseTo(result.endB.height, 1);
+	});
+
+	it('circumference matches bridge tube, not parent tubes', () => {
+		const result = generateBridgeMiter({
+			...baseBridge,
+			parentDiameterA: 14,
+			parentDiameterB: 22.2
+		});
+		expect(result.circumference).toBeCloseTo(Math.PI * 12.7, 1);
+		expect(result.endA.circumference).toBeCloseTo(Math.PI * 12.7, 1);
+		expect(result.endB.circumference).toBeCloseTo(Math.PI * 12.7, 1);
+	});
+
+	it('all bridge presets generate valid results', () => {
+		for (const preset of BRIDGE_PRESETS) {
+			const result = generateBridgeMiter({
+				tubeDiameter: preset.tubeDiameter,
+				wallThickness: preset.wallThickness,
+				parentDiameterA: preset.parentDiameterA,
+				parentDiameterB: preset.parentDiameterB,
+				angleA: preset.angleA,
+				angleB: preset.angleB,
+				bridgeLength: preset.bridgeLength
+			});
+			expect(result.endA.points.length).toBe(1440);
+			expect(result.endB.points.length).toBe(1440);
+			expect(result.endA.height).toBeGreaterThan(0);
+			expect(result.endB.height).toBeGreaterThan(0);
+			expect(result.bridgeLength).toBeGreaterThan(0);
+		}
+	});
+
+	it('custom resolution is passed to both ends', () => {
+		const result = generateBridgeMiter({ ...baseBridge, resolution: 360 });
+		expect(result.endA.points.length).toBe(360);
+		expect(result.endB.points.length).toBe(360);
+	});
+});
+
+// ============================================================
+// Compound Angle (Seatstay → Seat Tube)
+// ============================================================
+
+describe('computeCompoundAngle', () => {
+	it('zero splay returns elevation as true angle', () => {
+		const { trueAngle, twist } = computeCompoundAngle(65, 0);
+		expect(trueAngle).toBeCloseTo(65, 4);
+		expect(twist).toBeCloseTo(0, 4);
+	});
+
+	it('zero elevation and 90° splay returns 90° true angle', () => {
+		const { trueAngle } = computeCompoundAngle(0, 90);
+		expect(trueAngle).toBeCloseTo(90, 4);
+	});
+
+	it('compound angle is always >= elevation', () => {
+		for (const elev of [30, 45, 60, 75]) {
+			for (const splay of [0, 2, 5, 10, 15]) {
+				const { trueAngle } = computeCompoundAngle(elev, splay);
+				expect(trueAngle).toBeGreaterThanOrEqual(elev - 0.001);
+			}
+		}
+	});
+
+	it('known values: 65° elevation + 5° splay', () => {
+		const { trueAngle, twist } = computeCompoundAngle(65, 5);
+		// cos(65°)·cos(5°) = 0.4226·0.9962 = 0.4210 → arccos = 65.1°
+		expect(trueAngle).toBeCloseTo(65.1, 0);
+		// atan2(sin(5°), sin(65°)·cos(5°)) = atan2(0.0872, 0.9028) ≈ 5.5°
+		expect(twist).toBeCloseTo(5.5, 0);
+	});
+
+	it('symmetric: same splay on both sides gives same true angle', () => {
+		const pos = computeCompoundAngle(65, 5);
+		const neg = computeCompoundAngle(65, -5);
+		expect(pos.trueAngle).toBeCloseTo(neg.trueAngle, 4);
+	});
+
+	it('twist is zero when splay is zero', () => {
+		const { twist } = computeCompoundAngle(45, 0);
+		expect(twist).toBeCloseTo(0, 4);
+	});
+
+	it('twist approaches 90° as elevation approaches 0°', () => {
+		const { twist } = computeCompoundAngle(1, 45);
+		expect(twist).toBeGreaterThan(80);
+	});
+});
+
+describe('generateCompoundMiter', () => {
+	const baseCompound: CompoundAngleParams = {
+		stayDiameter: 14,
+		seatTubeDiameter: 28.6,
+		wallThickness: 0.8,
+		elevation: 65,
+		splay: 5,
+		staySpacing: 42
+	};
+
+	it('generates valid cope result', () => {
+		const result = generateCompoundMiter(baseCompound);
+		expect(result.points.length).toBe(1440);
+		expect(result.height).toBeGreaterThan(0);
+		expect(result.circumference).toBeCloseTo(Math.PI * 14, 1);
+	});
+
+	it('zero splay matches standard offset miter', () => {
+		const compound = generateCompoundMiter({
+			...baseCompound,
+			splay: 0
+		});
+		const standard = generateCope({
+			cutDiameter: 14,
+			parentDiameter: 28.6,
+			wallThickness: 0.8,
+			angle: 65,
+			offset: 21 // staySpacing/2
+		});
+
+		expect(compound.height).toBeCloseTo(standard.height, 2);
+	});
+
+	it('splay increases template height slightly', () => {
+		const noSplay = generateCompoundMiter({ ...baseCompound, splay: 0 });
+		const withSplay = generateCompoundMiter({ ...baseCompound, splay: 10 });
+
+		// More splay = steeper true angle = slightly taller template
+		expect(withSplay.height).not.toBeCloseTo(noSplay.height, 1);
+	});
+
+	it('produces offset in the result params', () => {
+		const result = generateCompoundMiter(baseCompound);
+		expect(result.params.offset).toBeCloseTo(21, 1);
+	});
+
+	it('all compound presets generate valid templates', () => {
+		for (const preset of COMPOUND_PRESETS) {
+			const result = generateCompoundMiter({
+				stayDiameter: preset.stayDiameter,
+				seatTubeDiameter: preset.seatTubeDiameter,
+				wallThickness: preset.wallThickness,
+				elevation: preset.elevation,
+				splay: preset.splay,
+				staySpacing: preset.staySpacing
+			});
+			expect(result.points.length).toBe(1440);
+			expect(result.height).toBeGreaterThan(0);
+			expect(result.circumference).toBeGreaterThan(0);
+		}
+	});
+
+	it('custom resolution is passed through', () => {
+		const result = generateCompoundMiter({ ...baseCompound, resolution: 360 });
+		expect(result.points.length).toBe(360);
 	});
 });

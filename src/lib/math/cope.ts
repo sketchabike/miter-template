@@ -385,3 +385,277 @@ export const PRESETS: JointPreset[] = [
 		angle: 90
 	}
 ];
+
+// ============================================================
+// Joint Types
+// ============================================================
+
+export type JointType = 'standard' | 'flat-plate' | 'bridge' | 'compound-ss';
+
+// ============================================================
+// Bridge Miter — double-ended template for braces/bridges
+// ============================================================
+
+export interface BridgeParams {
+	/** Bridge/brace tube OD in mm */
+	tubeDiameter: number;
+	/** Wall thickness of the bridge tube in mm */
+	wallThickness: number;
+	/** Parent tube OD at end A in mm */
+	parentDiameterA: number;
+	/** Parent tube OD at end B in mm */
+	parentDiameterB: number;
+	/** Angle at end A in degrees */
+	angleA: number;
+	/** Angle at end B in degrees */
+	angleB: number;
+	/** Distance between parent tube centers along bridge centerline in mm */
+	bridgeLength: number;
+	/** Number of sample points */
+	resolution?: number;
+}
+
+export interface BridgeResult {
+	/** Cope for end A (near end / bottom of template) */
+	endA: CopeResult;
+	/** Cope for end B (far end / top of template) */
+	endB: CopeResult;
+	/** Distance between parent tube centers along bridge centerline */
+	bridgeLength: number;
+	/** Bridge tube circumference */
+	circumference: number;
+}
+
+/**
+ * Generate a double-ended bridge/brace miter template.
+ * Produces two cope curves (one for each end) that share the same circumference.
+ */
+export function generateBridgeMiter(params: BridgeParams): BridgeResult {
+	const {
+		tubeDiameter,
+		wallThickness,
+		parentDiameterA,
+		parentDiameterB,
+		angleA,
+		angleB,
+		bridgeLength,
+		resolution = 1440
+	} = params;
+
+	const endA = generateCope({
+		cutDiameter: tubeDiameter,
+		parentDiameter: parentDiameterA,
+		wallThickness,
+		angle: angleA,
+		resolution
+	});
+
+	const endB = generateCope({
+		cutDiameter: tubeDiameter,
+		parentDiameter: parentDiameterB,
+		wallThickness,
+		angle: angleB,
+		resolution
+	});
+
+	return {
+		endA,
+		endB,
+		bridgeLength,
+		circumference: Math.PI * tubeDiameter
+	};
+}
+
+// ============================================================
+// Compound Angle — seatstay-to-seat-tube with lateral splay
+// ============================================================
+
+export interface CompoundAngleParams {
+	/** Seatstay tube OD in mm */
+	stayDiameter: number;
+	/** Seat tube OD in mm */
+	seatTubeDiameter: number;
+	/** Wall thickness of the stay in mm */
+	wallThickness: number;
+	/** Elevation angle in degrees (angle between stay and seat tube in side view) */
+	elevation: number;
+	/** Lateral splay angle in degrees (angle out of center plane) */
+	splay: number;
+	/** Stay spacing at seat tube in mm (center-to-center between left and right stays) */
+	staySpacing: number;
+	/** Number of sample points */
+	resolution?: number;
+}
+
+/**
+ * Compute the true 3D inter-tube angle and twist from elevation + splay.
+ *
+ * The seatstay direction vector in the seat tube's coordinate frame:
+ *   d = (sin(elev)·cos(splay), sin(splay), cos(elev)·cos(splay))
+ *
+ * True angle = arccos(d · ẑ) = arccos(cos(elev)·cos(splay))
+ * Twist = rotation of the cope pattern to match the 3D approach angle
+ */
+export function computeCompoundAngle(
+	elevationDeg: number,
+	splayDeg: number
+): { trueAngle: number; twist: number } {
+	const a = (elevationDeg * Math.PI) / 180;
+	const b = (splayDeg * Math.PI) / 180;
+	const trueAngle = (Math.acos(Math.cos(a) * Math.cos(b)) * 180) / Math.PI;
+	const twist = (Math.atan2(Math.sin(b), Math.sin(a) * Math.cos(b)) * 180) / Math.PI;
+	return { trueAngle, twist };
+}
+
+/**
+ * Generate a compound-angle seatstay miter.
+ * Converts elevation + splay to true 3D angle, twist, and offset,
+ * then delegates to the standard generateCope().
+ */
+export function generateCompoundMiter(params: CompoundAngleParams): CopeResult {
+	const {
+		stayDiameter,
+		seatTubeDiameter,
+		wallThickness,
+		elevation,
+		splay,
+		staySpacing,
+		resolution = 1440
+	} = params;
+
+	const { trueAngle, twist } = computeCompoundAngle(elevation, splay);
+	const lateralOffset = staySpacing / 2;
+
+	return generateCope({
+		cutDiameter: stayDiameter,
+		parentDiameter: seatTubeDiameter,
+		wallThickness,
+		angle: trueAngle,
+		offset: lateralOffset,
+		twist,
+		resolution
+	});
+}
+
+// ============================================================
+// Joint-type-specific presets
+// ============================================================
+
+export const FLAT_PLATE_PRESETS: JointPreset[] = [
+	{
+		name: 'Gusset at 45°',
+		description: 'Round tube to flat gusset plate',
+		cutDiameter: 25.4,
+		parentDiameter: 100, // irrelevant for flat mode (cancels out)
+		wallThickness: 0.9,
+		angle: 45
+	},
+	{
+		name: 'Mounting Tab at 90°',
+		description: 'Perpendicular tube to flat plate (fish mouth)',
+		cutDiameter: 25.4,
+		parentDiameter: 100,
+		wallThickness: 0.9,
+		angle: 90
+	},
+	{
+		name: 'Custom Flat',
+		description: 'Enter your own dimensions',
+		cutDiameter: 25.4,
+		parentDiameter: 100,
+		wallThickness: 0.9,
+		angle: 45
+	}
+];
+
+export interface BridgePreset {
+	name: string;
+	description: string;
+	tubeDiameter: number;
+	wallThickness: number;
+	parentDiameterA: number;
+	parentDiameterB: number;
+	angleA: number;
+	angleB: number;
+	bridgeLength: number;
+}
+
+export const BRIDGE_PRESETS: BridgePreset[] = [
+	{
+		name: 'Seat Stay Bridge',
+		description: 'Bridge between seatstays (perpendicular)',
+		tubeDiameter: 12.7,
+		wallThickness: 0.8,
+		parentDiameterA: 14,
+		parentDiameterB: 14,
+		angleA: 90,
+		angleB: 90,
+		bridgeLength: 100
+	},
+	{
+		name: 'Chain Stay Bridge',
+		description: 'Bridge between chainstays',
+		tubeDiameter: 12.7,
+		wallThickness: 0.8,
+		parentDiameterA: 22.2,
+		parentDiameterB: 22.2,
+		angleA: 90,
+		angleB: 90,
+		bridgeLength: 70
+	},
+	{
+		name: 'Custom Bridge',
+		description: 'Enter your own dimensions',
+		tubeDiameter: 12.7,
+		wallThickness: 0.8,
+		parentDiameterA: 25.4,
+		parentDiameterB: 25.4,
+		angleA: 90,
+		angleB: 90,
+		bridgeLength: 80
+	}
+];
+
+export interface CompoundPreset {
+	name: string;
+	description: string;
+	stayDiameter: number;
+	seatTubeDiameter: number;
+	wallThickness: number;
+	elevation: number;
+	splay: number;
+	staySpacing: number;
+}
+
+export const COMPOUND_PRESETS: CompoundPreset[] = [
+	{
+		name: 'Road Seatstay',
+		description: 'Typical road SS → ST with light splay',
+		stayDiameter: 14,
+		seatTubeDiameter: 28.6,
+		wallThickness: 0.8,
+		elevation: 65,
+		splay: 4,
+		staySpacing: 42
+	},
+	{
+		name: 'Touring Seatstay',
+		description: 'Wider spacing for rack mounts',
+		stayDiameter: 14,
+		seatTubeDiameter: 28.6,
+		wallThickness: 0.8,
+		elevation: 63,
+		splay: 6,
+		staySpacing: 44
+	},
+	{
+		name: 'Custom Compound',
+		description: 'Enter your own dimensions',
+		stayDiameter: 14,
+		seatTubeDiameter: 28.6,
+		wallThickness: 0.8,
+		elevation: 65,
+		splay: 5,
+		staySpacing: 42
+	}
+];
